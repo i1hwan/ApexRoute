@@ -1,4 +1,3 @@
-// @ts-check
 /**
  * Usage History — extracted from usageDb.js (T-15)
  *

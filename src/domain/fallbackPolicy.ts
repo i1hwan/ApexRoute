@@ -10,7 +10,6 @@
  * @module domain/fallbackPolicy
  */
 
-// @ts-check
 
 import {
   saveFallbackChain,

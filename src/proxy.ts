@@ -3,6 +3,8 @@ import { jwtVerify } from "jose";
 import { generateRequestId } from "./shared/utils/requestId";
 import { getSettings } from "./lib/localDb";
 import { isPublicRoute, verifyAuth, isAuthRequired } from "./shared/utils/apiAuth";
+import { checkBodySize, getBodySizeLimit } from "./shared/middleware/bodySizeGuard";
+import { isDraining } from "./lib/gracefulShutdown";
 
 // FASE-01: Fail-fast — no hardcoded fallback. Server must have JWT_SECRET configured.
 if (!process.env.JWT_SECRET) {
@@ -18,6 +20,26 @@ export async function proxy(request) {
   const requestId = generateRequestId();
   const response = NextResponse.next();
   response.headers.set("X-Request-Id", requestId);
+
+  // ──────────────── Pre-flight: Reject during shutdown drain ────────────────
+  if (isDraining() && pathname.startsWith("/api/")) {
+    return NextResponse.json(
+      {
+        error: {
+          code: "SERVICE_UNAVAILABLE",
+          message: "Server is shutting down",
+          correlation_id: requestId,
+        },
+      },
+      { status: 503 }
+    );
+  }
+
+  // ──────────────── Pre-flight: Reject oversized bodies ────────────────
+  if (pathname.startsWith("/api/") && request.method !== "GET" && request.method !== "OPTIONS") {
+    const bodySizeRejection = checkBodySize(request, getBodySizeLimit(pathname));
+    if (bodySizeRejection) return bodySizeRejection;
+  }
 
   // ──────────────── Protect Management API Routes ────────────────
   if (pathname.startsWith("/api/") && !pathname.startsWith("/api/v1/")) {

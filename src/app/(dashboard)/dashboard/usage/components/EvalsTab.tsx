@@ -184,8 +184,10 @@ export default function EvalsTab() {
 
   // Count total cases and unique models across all suites
   const totalCases = suites.reduce((sum, s) => sum + (s.cases?.length || s.caseCount || 0), 0);
-  const uniqueModels = [
-    ...new Set(suites.flatMap((s) => (s.cases || []).map((c) => c.model).filter(Boolean))),
+  const uniqueModels: string[] = [
+    ...new Set(
+      suites.flatMap((s: any) => (s.cases || []).map((c: any) => c.model)).filter(Boolean)
+    ),
   ];
 
   if (loading) {
@@ -393,8 +395,8 @@ export default function EvalsTab() {
             const caseCount = suite.cases?.length || suite.caseCount || 0;
 
             // Count unique models in this suite
-            const suiteModels = [
-              ...new Set((suite.cases || []).map((c) => c.model).filter(Boolean)),
+            const suiteModels: string[] = [
+              ...new Set<string>((suite.cases || []).map((c: any) => c.model).filter(Boolean)),
             ];
 
             return (

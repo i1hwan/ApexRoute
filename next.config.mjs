@@ -6,9 +6,8 @@ const nextConfig = {
   transpilePackages: ["@omniroute/open-sse"],
   allowedDevOrigins: ["192.168.*"],
   typescript: {
-    // Migration Phase: ignore TS errors during build.
-    // Remove after all 984 type errors are resolved.
-    ignoreBuildErrors: true,
+    // All TS errors resolved — strict checking enforced
+    ignoreBuildErrors: false,
   },
   images: {
     unoptimized: true,

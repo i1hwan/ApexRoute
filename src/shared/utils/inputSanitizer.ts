@@ -1,4 +1,3 @@
-// @ts-check
 /**
  * Input Sanitizer — FASE-01 Security Hardening
  *

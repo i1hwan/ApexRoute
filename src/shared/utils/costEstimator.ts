@@ -1,4 +1,3 @@
-// @ts-check
 /**
  * Cost Estimator — Pre-flight cost estimation for LLM requests
  *

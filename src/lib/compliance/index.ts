@@ -9,7 +9,6 @@
  * @module lib/compliance
  */
 
-// @ts-check
 
 import { getDbInstance } from "../db/core";
 

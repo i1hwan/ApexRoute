@@ -1,4 +1,5 @@
 import nextVitals from "eslint-config-next/core-web-vitals";
+import tseslint from "typescript-eslint";
 
 /** @type {import("eslint").Linter.Config[]} */
 const eslintConfig = [
@@ -14,6 +15,9 @@ const eslintConfig = [
   // Relaxed rules for open-sse and tests (incremental adoption)
   {
     files: ["open-sse/**/*.ts", "tests/**/*.mjs", "tests/**/*.ts"],
+    plugins: {
+      "@typescript-eslint": tseslint.plugin,
+    },
     rules: {
       "@typescript-eslint/no-explicit-any": "warn",
       "@next/next/no-assign-module-variable": "off",

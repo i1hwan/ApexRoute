@@ -8,7 +8,6 @@
  * @module lib/evals/evalRunner
  */
 
-// @ts-check
 
 /**
  * @typedef {Object} EvalCase

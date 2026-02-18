@@ -9,7 +9,6 @@
  * @module domain/modelAvailability
  */
 
-// @ts-check
 
 /**
  * @typedef {Object} UnavailableEntry

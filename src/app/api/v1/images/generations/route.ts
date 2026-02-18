@@ -1,3 +1,4 @@
+import { CORS_ORIGIN } from "@/shared/utils/cors";
 import { handleImageGeneration } from "@omniroute/open-sse/handlers/imageGeneration.ts";
 import { getProviderCredentials, extractApiKey, isValidApiKey } from "@/sse/services/auth";
 import { parseImageModel, getAllImageModels } from "@omniroute/open-sse/config/imageRegistry.ts";
@@ -12,7 +13,7 @@ import { toJsonErrorPayload } from "@/shared/utils/upstreamError";
 export async function OPTIONS() {
   return new Response(null, {
     headers: {
-      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Origin": CORS_ORIGIN,
       "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
       "Access-Control-Allow-Headers": "*",
     },
@@ -92,15 +93,15 @@ export async function POST(request) {
   const result = await handleImageGeneration({ body, credentials, log });
 
   if (result.success) {
-    return new Response(JSON.stringify(result.data), {
+    return new Response(JSON.stringify((result as any).data), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
   }
 
-  const errorPayload = toJsonErrorPayload(result.error, "Image generation provider error");
+  const errorPayload = toJsonErrorPayload((result as any).error, "Image generation provider error");
   return new Response(JSON.stringify(errorPayload), {
-    status: result.status,
+    status: (result as any).status,
     headers: { "Content-Type": "application/json" },
   });
 }

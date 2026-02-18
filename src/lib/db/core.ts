@@ -8,6 +8,7 @@ import Database from "better-sqlite3";
 import path from "node:path";
 import fs from "node:fs";
 import { resolveDataDir, getLegacyDotDataDir } from "../dataPaths";
+import { runMigrations } from "./migrationRunner";
 
 // ──────────────── Environment Detection ────────────────
 
@@ -351,6 +352,20 @@ export function getDbInstance() {
   _db.pragma("synchronous = NORMAL");
   _db.exec(SCHEMA_SQL);
   ensureProviderConnectionsColumns(_db);
+
+  // ── Versioned Migrations ──
+  // Auto-seed 001 as applied (the inline SCHEMA_SQL already created these tables)
+  // then run any new migrations (002+)
+  _db.exec(`
+    CREATE TABLE IF NOT EXISTS _omniroute_migrations (
+      version TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    INSERT OR IGNORE INTO _omniroute_migrations (version, name)
+    VALUES ('001', 'initial_schema');
+  `);
+  runMigrations(_db);
 
   // Auto-migrate from db.json if exists
   if (JSON_DB_FILE && fs.existsSync(JSON_DB_FILE)) {

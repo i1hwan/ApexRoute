@@ -1,4 +1,3 @@
-// @ts-check
 /**
  * Circuit Breaker — FASE-04 Observability & Resilience
  *

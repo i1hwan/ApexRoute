@@ -1,4 +1,3 @@
-// @ts-check
 /**
  * Stream Tracker — Unified SSE stream monitoring
  *

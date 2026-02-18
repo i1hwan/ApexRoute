@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.2] — 2026-02-18
+
+> ### 🔒 Security Hardening, Architecture Improvements & UX Polish
+>
+> Comprehensive audit-driven improvements across security, architecture, testing, and user experience.
+
+### 🛡️ Security (Phase 0)
+
+- **Auth guard** — API route protection via `withAuth` middleware for all dashboard routes
+- **CSRF protection** — Token-based CSRF guard for all state-changing API routes
+- **Request payload validation** — Zod schemas for provider, combo, key, and settings endpoints
+- **Prompt injection guard** — Input sanitization against malicious prompt patterns
+- **Body size guard** — Route-specific body size limits with dedicated audio upload threshold
+- **Rate limiter** — Per-IP rate limiting with configurable windows and thresholds
+
+### 🏗️ Architecture (Phase 1–2)
+
+- **DI container** — Simple dependency injection container for service registration
+- **Policy engine** — Consolidated `PolicyEngine` for routing, security, and rate limiting
+- **SQLite migration** — Database migration system with versioned migration runner
+- **Graceful shutdown** — Clean server shutdown with connection draining
+- **TypeScript fixes** — Resolved all `tsc` errors; removed redundant `@ts-check` directives
+- **Pipeline decomposition** — `handleSingleModelChat` decomposed into composable pipeline stages
+- **Prompt template versioning** — Version-tracked prompt templates with rollback support
+- **Eval scheduling** — Automated evaluation suite scheduling with cron-based runner
+- **Plugin architecture** — Extensible plugin system for custom middleware and handlers
+
+### 🧪 Testing & CI (Phase 2)
+
+- **Coverage thresholds** — Jest coverage thresholds enforced in CI (368 tests passing)
+- **Proxy pipeline integration tests** — End-to-end tests for the proxy request pipeline
+- **CI audit workflow** — npm audit and security scanning in GitHub Actions
+- **k6 load tests** — Performance testing with ramping VUs and custom metrics
+
+### ✨ UX & Polish (Phase 3–4)
+
+- **Session management** — Session info card with login time, age, user agent, and logout
+- **Focus indicators** — Global `:focus-visible` styles and `--focus-ring` CSS utility
+- **Audit log viewer** — Security event audit log with structured data display
+- **Dashboard cleanup** — Removed unused files, fixed Quick Start links to Endpoint page
+- **Documentation** — Troubleshooting guide, deployment improvements
+
+---
+
 ## [1.1.0] — 2026-02-18
 
 > ### 🔧 API Compatibility & SDK Hardening
@@ -188,4 +232,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 [1.1.0]: https://github.com/diegosouzapw/OmniRoute/releases/tag/v1.1.0
+[1.0.2]: https://github.com/diegosouzapw/OmniRoute/releases/tag/v1.0.2
 [1.0.0]: https://github.com/diegosouzapw/OmniRoute/releases/tag/v1.0.0

@@ -1,4 +1,3 @@
-// @ts-check
 /**
  * a11y Audit — Basic WCAG Accessibility Checker
  *

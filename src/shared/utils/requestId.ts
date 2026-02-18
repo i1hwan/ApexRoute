@@ -10,7 +10,6 @@
  * @module shared/utils/requestId
  */
 
-// @ts-check
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";

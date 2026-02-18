@@ -1,4 +1,3 @@
-// @ts-check
 /**
  * Zod Validation Schemas — Shared request schemas for API routes
  *

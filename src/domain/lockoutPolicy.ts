@@ -1,4 +1,3 @@
-// @ts-check
 /**
  * Lockout Policy — FASE-09 Domain Extraction (T-46)
  *

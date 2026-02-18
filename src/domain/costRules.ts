@@ -9,7 +9,6 @@
  * @module domain/costRules
  */
 
-// @ts-check
 
 import {
   saveBudget,
