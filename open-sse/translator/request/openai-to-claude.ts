@@ -431,7 +431,6 @@ export function openaiToClaudeRequest(model, body, stream) {
 
 // Get content blocks from single message
 function getContentBlocksFromMessage(msg, toolNameMap = new Map(), disableToolPrefix = false) {
-  void toolNameMap;
   const blocks = [];
 
   if (msg.role === "tool") {
@@ -529,10 +528,16 @@ function getContentBlocksFromMessage(msg, toolNameMap = new Map(), disableToolPr
             const toolUseName = disableToolPrefix
               ? normalizedToolUseName
               : rewriteClaudeOAuthToolName(normalizedToolUseName);
+            const outputToolName = disableToolPrefix
+              ? toolUseName
+              : CLAUDE_OAUTH_TOOL_PREFIX + toolUseName;
+            if (!disableToolPrefix) {
+              toolNameMap.set(outputToolName, normalizedToolUseName);
+            }
             blocks.push({
               type: "tool_use",
               id: sanitizeToolId(part.id),
-              name: disableToolPrefix ? toolUseName : CLAUDE_OAUTH_TOOL_PREFIX + toolUseName,
+              name: outputToolName,
               input: part.input,
             });
           }
@@ -565,6 +570,9 @@ function getContentBlocksFromMessage(msg, toolNameMap = new Map(), disableToolPr
           const toolName = disableToolPrefix
             ? rewrittenName
             : CLAUDE_OAUTH_TOOL_PREFIX + rewrittenName;
+          if (!disableToolPrefix) {
+            toolNameMap.set(toolName, fnName.trim());
+          }
           blocks.push({
             type: "tool_use",
             id: sanitizeToolId(tc.id),

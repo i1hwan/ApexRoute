@@ -9,8 +9,10 @@ const {
   stripEmptyTextBlocks,
 } = await import("../../open-sse/translator/request/openai-to-claude.ts");
 const {
+  applyForwardingKeywordSettings,
   getDefaultForwardingKeywordConfig,
   getForwardingKeywordRulesForLane,
+  normalizeForwardingKeywordConfig,
   setForwardingKeywordConfig,
   rewriteForwardedTextForLane,
   rewriteForwardedToolNameForLane,
@@ -446,6 +448,49 @@ test("Forwarding keyword rules stay proxy-local and data-driven", () => {
   );
 });
 
+test("Forwarding keyword normalization rejects blank match and tag boundaries", () => {
+  const normalized = normalizeForwardingKeywordConfig({
+    "claude-oauth-prefixed": {
+      toolNames: [
+        { match: "   ", replace: "ignored" },
+        { match: " background_output ", replace: "background_result" },
+      ],
+      text: [{ match: "", replace: "ignored" }],
+      tags: [
+        {
+          open: "   ",
+          openReplacement: "ignored",
+          close: "</directories>",
+          closeReplacement: "",
+        },
+      ],
+    },
+  });
+
+  assert.deepEqual(normalized["claude-oauth-prefixed"].toolNames, [
+    { match: "background_output", replace: "background_result" },
+  ]);
+  assert.deepEqual(normalized["claude-oauth-prefixed"].text, []);
+  assert.deepEqual(normalized["claude-oauth-prefixed"].tags, []);
+});
+
+test("Forwarding keyword settings reset to defaults only after successful settings load", () => {
+  setForwardingKeywordConfig({
+    "claude-oauth-prefixed": {
+      toolNames: [{ match: "background_output", replace: "bg_out" }],
+      text: [{ match: "background_output", replace: "bg_out" }],
+      tags: [],
+    },
+  });
+
+  applyForwardingKeywordSettings({});
+
+  assert.deepEqual(
+    getForwardingKeywordRulesForLane("claude-oauth-prefixed"),
+    getDefaultForwardingKeywordConfig()["claude-oauth-prefixed"]
+  );
+});
+
 test("OpenAI-compatible -> Claude -> OpenAI-compatible preserves original tool names", () => {
   const request = openaiToClaudeRequest(
     "claude-4-sonnet",
@@ -497,6 +542,32 @@ test("OpenAI-compatible -> Claude -> OpenAI-compatible preserves original tool n
 
   assert.equal(
     streamingChunks[0].choices[0].delta.tool_calls[0].function.name,
+    "background_output"
+  );
+});
+
+test("OpenAI -> Claude stores tool name mappings for assistant tool calls without declared tools", () => {
+  const result = openaiToClaudeRequest(
+    "claude-4-sonnet",
+    {
+      messages: [
+        {
+          role: "assistant",
+          tool_calls: [
+            {
+              id: "call_1",
+              type: "function",
+              function: { name: "background_output", arguments: "{}" },
+            },
+          ],
+        },
+      ],
+    },
+    false
+  );
+
+  assert.equal(
+    result._toolNameMap.get(`${CLAUDE_OAUTH_TOOL_PREFIX}background_result`),
     "background_output"
   );
 });
