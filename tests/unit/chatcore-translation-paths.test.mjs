@@ -465,6 +465,67 @@ test("chatCore builds Claude Code-compatible upstream requests for CC providers"
   assert.equal(call.body.messages[0].content[0].text, "Ping");
 });
 
+test("chatCore rewrites lexical triggers in Claude Code-compatible upstream requests", async () => {
+  const { call, result } = await invokeChatCore({
+    provider: "anthropic-compatible-cc-test",
+    model: "claude-opus-4-6",
+    endpoint: "/v1/messages?beta=true",
+    accept: "text/event-stream",
+    credentials: {
+      accessToken: "oauth-token",
+      providerSpecificData: {
+        baseUrl: "https://api.anthropic.com/v1/messages",
+        chatPath: "/v1/messages?beta=true",
+      },
+    },
+    body: {
+      model: "claude-opus-4-6",
+      max_tokens: 32000,
+      stream: true,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "fix broken test" },
+            { type: "text", text: "testing" },
+            { type: "text", text: "hello" },
+          ],
+        },
+      ],
+      tools: [
+        {
+          name: "background_output",
+          description: "Get output from background task.",
+          input_schema: { type: "object", properties: { task_id: { type: "string" } } },
+        },
+        {
+          name: "background_cancel",
+          description: "Cancel running background task(s).",
+          input_schema: { type: "object", properties: { taskId: { type: "string" } } },
+        },
+      ],
+      tool_choice: { type: "tool", name: "background_cancel" },
+      system: [
+        {
+          type: "text",
+          text: "Use <directories>src/</directories> with background_output and background_cancel",
+        },
+      ],
+    },
+    responseFormat: "claude",
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(call.url, "https://api.anthropic.com/v1/messages?beta=true");
+  assert.equal(
+    call.body.system.at(-1).text,
+    "Use directories:\nsrc/ with background_result and background_stop"
+  );
+  assert.equal(call.body.tools[0].name, "background_result");
+  assert.equal(call.body.tools[1].name, "background_stop");
+  assert.deepEqual(call.body.tool_choice, { type: "tool", name: "background_stop" });
+});
+
 test("chatCore preserves cache_control automatically for Claude Code single-model requests", async () => {
   await settingsDb.updateSettings({ alwaysPreserveClientCache: "auto" });
   invalidateCacheControlSettingsCache();
@@ -617,7 +678,7 @@ test("chatCore default translation converts Claude requests to OpenAI and strips
   assert.equal(JSON.stringify(call.body).includes("cache_control"), false);
 });
 
-test("chatCore sets Claude tool prefix disabling, strips empty Anthropic text blocks, and cleans helper flags", async () => {
+test("chatCore rewrites OpenAI-compatible Claude requests instead of broadly disabling tool prefixes", async () => {
   const { call } = await invokeChatCore({
     provider: "claude",
     model: "claude-sonnet-4-6",
@@ -650,8 +711,8 @@ test("chatCore sets Claude tool prefix disabling, strips empty Anthropic text bl
   });
 
   assert.equal(call.body.model, "claude-sonnet-4-6");
-  assert.equal(call.body.tools[0].name, "Bash");
-  assert.equal(call.body.tools[0].name.startsWith("proxy_"), false);
+  assert.equal(call.body.tools[0].name, "proxy_Bash");
+  assert.equal(call.body.tools[0].name.startsWith("proxy_"), true);
   assert.equal(call.body._toolNameMap, undefined);
   assert.equal(call.body._disableToolPrefix, undefined);
   assert.deepEqual(
@@ -869,7 +930,9 @@ test("chatCore refreshes GitHub credentials after 401 and retries with the refre
   });
 
   const payload = await result.response.json();
-  const providerCalls = calls.filter((entry) => entry.url.startsWith("https://api.githubcopilot.com/"));
+  const providerCalls = calls.filter((entry) =>
+    entry.url.startsWith("https://api.githubcopilot.com/")
+  );
 
   assert.equal(result.success, true);
   assert.equal(providerCalls.length, 2);
