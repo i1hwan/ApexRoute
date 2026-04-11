@@ -164,6 +164,8 @@ export function applyThinkingBudget(body, config = null) {
   // Early exit: strip ALL reasoning/thinking params for models that don't support them.
   // Sending thinking params to unsupported models (e.g. AG claude-sonnet-4-6) causes 400 errors.
   const modelStr = typeof body.model === "string" ? body.model : "";
+  const originalHasExplicitThinking = hasExplicitThinkingConfig(body);
+  const originalHasThinkingLevelSignal = hasThinkingLevelSignal(body);
   if (modelStr && !supportsReasoning(modelStr)) {
     return stripThinkingConfig(body);
   }
@@ -174,12 +176,17 @@ export function applyThinkingBudget(body, config = null) {
   // Pre-processing: auto-inject thinking config for -thinking suffix models
   processed = ensureThinkingConfig(processed);
 
-  if (isClaudeModel(modelStr) && cfg.mode === ThinkingMode.ADAPTIVE) {
-    if (!hasExplicitThinkingConfig(processed) && hasExplicitEffortSignal(processed)) {
-      return setAdaptiveClaudeThinking(processed, cfg);
+  if (isClaudeModel(modelStr)) {
+    if (
+      !originalHasExplicitThinking &&
+      (hasExplicitEffortSignal(processed) || originalHasThinkingLevelSignal)
+    ) {
+      return setAdaptiveClaudeThinking(processed, cfg, body);
     }
 
-    return processed;
+    if (cfg.mode === ThinkingMode.ADAPTIVE) {
+      return processed;
+    }
   }
 
   switch (cfg.mode) {
@@ -212,19 +219,48 @@ function hasExplicitEffortSignal(body) {
   return Boolean(body?.output_config?.effort || body?.reasoning?.effort || body?.reasoning_effort);
 }
 
-function resolveAnthropicEffort(body, cfg) {
+function hasThinkingLevelSignal(body) {
+  const level = body?.thinkingLevel || body?.thinking_level;
+  return typeof level === "string" && level.trim().length > 0;
+}
+
+function thinkingLevelToEffort(level) {
+  const normalized = String(level || "")
+    .trim()
+    .toLowerCase();
+
+  if (normalized === "none" || normalized === "disabled") return "low";
+  if (normalized === "low") return "low";
+  if (normalized === "medium") return "medium";
+  if (normalized === "high") return "high";
+  if (normalized === "max") return "max";
+  if (normalized === "xhigh") return "xhigh";
+  return null;
+}
+
+function resolveAnthropicEffort(body, cfg, originalBody = body) {
+  const levelEffort = thinkingLevelToEffort(
+    originalBody?.thinkingLevel ||
+      originalBody?.thinking_level ||
+      body?.thinkingLevel ||
+      body?.thinking_level
+  );
   const rawEffort =
+    originalBody?.output_config?.effort ||
+    originalBody?.reasoning?.effort ||
+    originalBody?.reasoning_effort ||
     body?.output_config?.effort ||
     body?.reasoning?.effort ||
     body?.reasoning_effort ||
+    levelEffort ||
     cfg.effortLevel ||
     "max";
   return String(rawEffort || cfg.effortLevel || "max").toLowerCase();
 }
 
-function setAdaptiveClaudeThinking(body, cfg) {
+function setAdaptiveClaudeThinking(body, cfg, originalBody = body) {
   const result = { ...body };
-  const effort = resolveAnthropicEffort(result, cfg);
+  const effort = resolveAnthropicEffort(result, cfg, originalBody);
 
   result.thinking = { type: "adaptive" };
   result.output_config = {

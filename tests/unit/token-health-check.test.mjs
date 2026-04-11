@@ -41,3 +41,16 @@ test("buildRefreshFailureUpdate preserves expired retry tracking", () => {
   assert.equal(update.expiredRetryCount, 3);
   assert.equal(update.expiredRetryAt, now);
 });
+
+test("unwrapResolvedProxyConfig extracts the raw proxy object for refresh calls", () => {
+  assert.deepEqual(
+    tokenHealthCheck.unwrapResolvedProxyConfig({
+      proxy: { type: "http", host: "127.0.0.1", port: "8080" },
+      level: "provider",
+      levelId: "claude",
+    }),
+    { type: "http", host: "127.0.0.1", port: "8080" }
+  );
+  assert.equal(tokenHealthCheck.unwrapResolvedProxyConfig({ proxy: null }), null);
+  assert.equal(tokenHealthCheck.unwrapResolvedProxyConfig(null), null);
+});

@@ -134,6 +134,19 @@ test("ADAPTIVE: Claude requests use adaptive thinking and pass through effort", 
   setThinkingBudgetConfig(DEFAULT_THINKING_CONFIG);
 });
 
+test("Claude effort-only requests auto-promote to adaptive even outside adaptive mode", () => {
+  setThinkingBudgetConfig({ mode: ThinkingMode.PASSTHROUGH, effortLevel: "medium" });
+  const body = {
+    model: "claude-opus-4-6",
+    messages: [{ role: "user", content: "hello" }],
+    reasoning_effort: "max",
+  };
+  const result = applyThinkingBudget(body);
+  assert.deepEqual(result.thinking, { type: "adaptive" });
+  assert.deepEqual(result.output_config, { effort: "max" });
+  setThinkingBudgetConfig(DEFAULT_THINKING_CONFIG);
+});
+
 test("ADAPTIVE: Claude requests use configured effort when client does not send one", () => {
   setThinkingBudgetConfig({ mode: ThinkingMode.ADAPTIVE, effortLevel: "max" });
   const body = {
@@ -170,6 +183,20 @@ test("ADAPTIVE: Claude requests preserve xhigh effort values", () => {
   const result = applyThinkingBudget(body);
   assert.deepEqual(result.thinking, { type: "adaptive" });
   assert.deepEqual(result.output_config, { effort: "xhigh" });
+  setThinkingBudgetConfig(DEFAULT_THINKING_CONFIG);
+});
+
+test("Claude thinkingLevel-only requests auto-promote to adaptive effort", () => {
+  setThinkingBudgetConfig({ mode: ThinkingMode.PASSTHROUGH, effortLevel: "medium" });
+  const body = {
+    model: "claude-opus-4-6",
+    messages: [{ role: "user", content: "hello" }],
+    thinkingLevel: "max",
+  };
+  const result = applyThinkingBudget(body);
+  assert.deepEqual(result.thinking, { type: "adaptive" });
+  assert.deepEqual(result.output_config, { effort: "max" });
+  assert.equal(result.thinkingLevel, undefined);
   setThinkingBudgetConfig(DEFAULT_THINKING_CONFIG);
 });
 
@@ -301,7 +328,7 @@ test("hasThinkingCapableModel: matches -thinking suffix", () => {
   assert.ok(hasThinkingCapableModel({ model: "custom-model-thinking" }));
 });
 
-test("applyThinkingBudget: thinkingLevel 'high' + PASSTHROUGH = converts and passes through", () => {
+test("applyThinkingBudget: Claude thinkingLevel 'high' + PASSTHROUGH promotes to adaptive effort", () => {
   setThinkingBudgetConfig({ mode: ThinkingMode.PASSTHROUGH });
   const body = {
     model: "claude-sonnet-4",
@@ -309,7 +336,8 @@ test("applyThinkingBudget: thinkingLevel 'high' + PASSTHROUGH = converts and pas
     messages: [{ role: "user", content: "hello" }],
   };
   const result = applyThinkingBudget(body);
-  assert.equal(result.thinking.budget_tokens, 24576);
+  assert.deepEqual(result.thinking, { type: "adaptive" });
+  assert.deepEqual(result.output_config, { effort: "high" });
   assert.equal(result.thinkingLevel, undefined);
   setThinkingBudgetConfig(DEFAULT_THINKING_CONFIG);
 });

@@ -26,6 +26,8 @@ const { claudeToOpenAIResponse } =
 const { CLAUDE_SYSTEM_PROMPT } = await import("../../open-sse/config/constants.ts");
 const { DEFAULT_THINKING_CLAUDE_SIGNATURE } =
   await import("../../open-sse/config/defaultThinkingSignature.ts");
+const { translateRequest } = await import("../../open-sse/translator/index.ts");
+const { FORMATS } = await import("../../open-sse/translator/formats.ts");
 
 test.beforeEach(() => {
   setForwardingKeywordConfig(getDefaultForwardingKeywordConfig());
@@ -321,6 +323,27 @@ test("OpenAI -> Claude passes adaptive thinking effort upstream when provided", 
       max_tokens: 128000,
     },
     true
+  );
+
+  assert.deepEqual(result.thinking, { type: "adaptive" });
+  assert.deepEqual(result.output_config, { effort: "max" });
+  assert.equal(result.max_tokens, 128000);
+});
+
+test("translateRequest promotes Claude thinkingLevel-only requests to adaptive effort", () => {
+  const result = translateRequest(
+    FORMATS.OPENAI,
+    FORMATS.CLAUDE,
+    "claude-opus-4-6",
+    {
+      model: "claude-opus-4-6",
+      messages: [{ role: "user", content: "Think harder" }],
+      thinkingLevel: "max",
+      max_tokens: 128000,
+    },
+    false,
+    null,
+    "claude"
   );
 
   assert.deepEqual(result.thinking, { type: "adaptive" });

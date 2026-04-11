@@ -54,6 +54,15 @@ export function buildRefreshFailureUpdate(conn: any, now: string) {
   };
 }
 
+export function unwrapResolvedProxyConfig(
+  resolvedProxy:
+    | { proxy?: unknown; level?: string | null; levelId?: string | null }
+    | null
+    | undefined
+) {
+  return resolvedProxy?.proxy || null;
+}
+
 function isEnvFlagEnabled(name: string): boolean {
   const value = process.env[name];
   if (!value) return false;
@@ -255,7 +264,7 @@ async function checkConnection(conn) {
   };
 
   const hideLogs = await shouldHideLogs();
-  const proxyConfig = await resolveProxyForConnection(conn.id);
+  const proxyConfig = unwrapResolvedProxyConfig(await resolveProxyForConnection(conn.id));
   const result = await getAccessToken(
     conn.provider,
     credentials,
