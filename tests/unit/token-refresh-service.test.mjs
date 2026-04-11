@@ -279,7 +279,7 @@ test("refreshKimiCodingToken adds provider-specific headers and fields", async (
   assert.match(bodyToString(calls[0].options.body), /grant_type=refresh_token/);
 });
 
-test("refreshClaudeOAuthToken first matches Claude auth exchange token contract", async () => {
+test("refreshClaudeOAuthToken matches upstream Claude refresh contract", async () => {
   const log = createLog();
   const calls = [];
 
@@ -303,58 +303,49 @@ test("refreshClaudeOAuthToken first matches Claude auth exchange token contract"
   );
 
   assert.equal(calls[0].url, OAUTH_ENDPOINTS.anthropic.token);
-  assert.equal(calls[0].options.headers["Content-Type"], "application/json");
+  assert.equal(calls[0].options.headers["Content-Type"], "application/x-www-form-urlencoded");
+  assert.equal(calls[0].options.headers["anthropic-beta"], "oauth-2025-04-20");
   assert.equal(calls[0].options.headers["User-Agent"], undefined);
-  assert.equal(calls[0].options.headers["anthropic-beta"], undefined);
-  assert.deepEqual(JSON.parse(calls[0].options.body), {
-    grant_type: "refresh_token",
-    refresh_token: "claude-refresh",
-    client_id: PROVIDERS.claude.clientId,
-    scope:
-      "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers",
-  });
+  assert.equal(
+    bodyToString(calls[0].options.body),
+    `grant_type=refresh_token&refresh_token=claude-refresh&client_id=${encodeURIComponent(PROVIDERS.claude.clientId)}`
+  );
 });
 
-test("refreshClaudeOAuthToken retries with user-agent JSON then form when format is rejected", async () => {
+test("refreshClaudeOAuthToken returns null on invalid Claude refresh contract rejection", async () => {
   const log = createLog();
   const calls = [];
 
   await withMockedFetch(
     async (url, options = {}) => {
       calls.push({ url, options });
-      if (calls.length <= 2) {
-        return textResponse(
-          JSON.stringify({
-            type: "error",
-            error: { type: "invalid_request_error", message: "Invalid request format" },
-          }),
-          400
-        );
-      }
-
-      return jsonResponse({
-        access_token: "claude-access-form",
-        refresh_token: "claude-refresh-form",
-        expires_in: 900,
-      });
+      return textResponse(
+        JSON.stringify({
+          type: "error",
+          error: { type: "invalid_request_error", message: "Invalid request format" },
+        }),
+        400
+      );
     },
     async () => {
       const result = await refreshClaudeOAuthToken("claude-refresh", log);
-      assert.deepEqual(result, {
-        accessToken: "claude-access-form",
-        refreshToken: "claude-refresh-form",
-        expiresIn: 900,
-      });
+      assert.equal(result, null);
     }
   );
 
-  assert.equal(calls.length, 3);
-  assert.equal(calls[1].options.headers["Content-Type"], "application/json");
-  assert.equal(calls[1].options.headers["User-Agent"], "anthropic");
-  assert.equal(calls[2].options.headers["Content-Type"], "application/x-www-form-urlencoded");
-  assert.match(calls[2].options.body, /grant_type=refresh_token/);
-  assert.match(calls[2].options.body, /client_id=/);
-  assert.match(calls[2].options.body, /scope=org%3Acreate_api_key/);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].options.headers["Content-Type"], "application/x-www-form-urlencoded");
+  assert.equal(calls[0].options.headers["anthropic-beta"], "oauth-2025-04-20");
+  assert.equal(
+    log.entries.some((entry) => entry.level === "warn"),
+    false
+  );
+  assert.equal(
+    log.entries.some(
+      (entry) => entry.level === "error" && entry.message === "Failed to refresh Claude OAuth token"
+    ),
+    true
+  );
 });
 
 test("refreshGoogleToken exchanges refresh tokens against the shared google endpoint", async () => {
