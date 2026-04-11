@@ -222,21 +222,20 @@ export async function refreshKimiCodingToken(refreshToken, log, proxyConfig = nu
  */
 export async function refreshClaudeOAuthToken(refreshToken, log, proxyConfig = null) {
   try {
-    const params = new URLSearchParams({
+    const payload = {
       grant_type: "refresh_token",
       refresh_token: refreshToken,
       client_id: PROVIDERS.claude.clientId,
-    });
+    };
 
     const response = await runWithProxyContext(proxyConfig, () =>
       fetch(OAUTH_ENDPOINTS.anthropic.token, {
         method: "POST",
         headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
+          "Content-Type": "application/json",
           Accept: "application/json",
-          "anthropic-beta": "oauth-2025-04-20",
         },
-        body: params.toString(),
+        body: JSON.stringify(payload),
       })
     );
 
