@@ -49,29 +49,38 @@ function cloneForwardingKeywordConfig(config: ForwardingKeywordConfig): Forwardi
   return JSON.parse(JSON.stringify(config)) as ForwardingKeywordConfig;
 }
 
+function normalizeNonEmptyString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalizedValue = value.trim();
+  return normalizedValue ? normalizedValue : null;
+}
+
 function normalizeKeywordRule(rule: unknown): ForwardingKeywordRule | null {
   if (!rule || typeof rule !== "object") return null;
   const candidate = rule as Record<string, unknown>;
-  if (typeof candidate.match !== "string" || typeof candidate.replace !== "string") return null;
-  return { match: candidate.match, replace: candidate.replace };
+  const match = normalizeNonEmptyString(candidate.match);
+  if (!match || typeof candidate.replace !== "string") return null;
+  return { match, replace: candidate.replace };
 }
 
 function normalizeTagRule(rule: unknown): ForwardingTagRule | null {
   if (!rule || typeof rule !== "object") return null;
   const candidate = rule as Record<string, unknown>;
+  const open = normalizeNonEmptyString(candidate.open);
+  const close = normalizeNonEmptyString(candidate.close);
   if (
-    typeof candidate.open !== "string" ||
+    !open ||
     typeof candidate.openReplacement !== "string" ||
-    typeof candidate.close !== "string" ||
+    !close ||
     typeof candidate.closeReplacement !== "string"
   ) {
     return null;
   }
 
   return {
-    open: candidate.open,
+    open,
     openReplacement: candidate.openReplacement,
-    close: candidate.close,
+    close,
     closeReplacement: candidate.closeReplacement,
   };
 }
@@ -108,6 +117,15 @@ export function normalizeForwardingKeywordConfig(value: unknown): ForwardingKeyw
 
 export function setForwardingKeywordConfig(config: unknown) {
   forwardingKeywordConfig = normalizeForwardingKeywordConfig(config);
+}
+
+export function applyForwardingKeywordSettings(settings: Record<string, unknown>) {
+  if (Object.prototype.hasOwnProperty.call(settings, "forwardingKeywordRules")) {
+    setForwardingKeywordConfig(settings.forwardingKeywordRules);
+    return;
+  }
+
+  setForwardingKeywordConfig(getDefaultForwardingKeywordConfig());
 }
 
 export function getForwardingKeywordConfig(): ForwardingKeywordConfig {
