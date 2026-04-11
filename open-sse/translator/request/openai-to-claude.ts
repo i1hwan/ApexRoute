@@ -1,6 +1,10 @@
 import { register } from "../registry.ts";
 import { FORMATS } from "../formats.ts";
 import { CLAUDE_SYSTEM_PROMPT } from "../../config/constants.ts";
+import {
+  rewriteForwardedTextForLane,
+  rewriteForwardedToolNameForLane,
+} from "../../config/forwardingKeywordRules.ts";
 import { adjustMaxTokens } from "../helpers/maxTokensHelper.ts";
 import { sanitizeToolId } from "../helpers/schemaCoercion.ts";
 import { DEFAULT_THINKING_CLAUDE_SIGNATURE } from "../../config/defaultThinkingSignature.ts";
@@ -9,12 +13,7 @@ import { DEFAULT_THINKING_CLAUDE_SIGNATURE } from "../../config/defaultThinkingS
 // Can be disabled per-request via body._disableToolPrefix = true
 export const CLAUDE_OAUTH_TOOL_PREFIX = "proxy_";
 const CLAUDE_TOOL_CHOICE_REQUIRED = "an" + "y";
-const CLAUDE_OAUTH_LEXICAL_TOOL_REWRITES = {
-  background_output: "background_result",
-  background_cancel: "background_stop",
-} as const;
-const CLAUDE_OAUTH_DIRECTORIES_OPEN_TAG = /<directories>/g;
-const CLAUDE_OAUTH_DIRECTORIES_CLOSE_TAG = /<\/directories>/g;
+const CLAUDE_OAUTH_PREFIXED_LANE = "claude-oauth-prefixed";
 
 type ClaudeContentBlock = Record<string, unknown>;
 type ClaudeMessage = {
@@ -35,21 +34,11 @@ type ClaudeTool = {
 };
 
 function rewriteClaudeOAuthLexicalText(text: string): string {
-  if (!text) return text;
-
-  return text
-    .replaceAll("background_output", CLAUDE_OAUTH_LEXICAL_TOOL_REWRITES.background_output)
-    .replaceAll("background_cancel", CLAUDE_OAUTH_LEXICAL_TOOL_REWRITES.background_cancel)
-    .replace(CLAUDE_OAUTH_DIRECTORIES_OPEN_TAG, "directories:\n")
-    .replace(CLAUDE_OAUTH_DIRECTORIES_CLOSE_TAG, "");
+  return rewriteForwardedTextForLane(CLAUDE_OAUTH_PREFIXED_LANE, text);
 }
 
 function rewriteClaudeOAuthToolName(toolName: string): string {
-  return (
-    CLAUDE_OAUTH_LEXICAL_TOOL_REWRITES[
-      toolName as keyof typeof CLAUDE_OAUTH_LEXICAL_TOOL_REWRITES
-    ] ?? toolName
-  );
+  return rewriteForwardedToolNameForLane(CLAUDE_OAUTH_PREFIXED_LANE, toolName);
 }
 
 /**
@@ -87,6 +76,37 @@ export function stripEmptyTextBlocks(content: unknown[] | undefined): unknown[] 
       }
       return block;
     });
+}
+
+function rewriteTextBlocksRecursively(
+  content: unknown[] | undefined,
+  disableToolPrefix = false
+): unknown[] {
+  if (!Array.isArray(content)) return content ?? [];
+
+  return content.map((block: unknown) => {
+    if (!block || typeof block !== "object") return block;
+
+    const blockRecord = block as Record<string, unknown>;
+
+    if (blockRecord.type === "text" && typeof blockRecord.text === "string") {
+      return {
+        ...blockRecord,
+        text: disableToolPrefix
+          ? blockRecord.text
+          : rewriteClaudeOAuthLexicalText(blockRecord.text),
+      };
+    }
+
+    if (blockRecord.type === "tool_result" && Array.isArray(blockRecord.content)) {
+      return {
+        ...blockRecord,
+        content: rewriteTextBlocksRecursively(blockRecord.content, disableToolPrefix),
+      };
+    }
+
+    return block;
+  });
 }
 
 /**
@@ -332,7 +352,7 @@ export function openaiToClaudeRequest(model, body, stream) {
 
   // Tool choice
   if (body.tool_choice) {
-    result.tool_choice = convertOpenAIToolChoice(body.tool_choice);
+    result.tool_choice = convertOpenAIToolChoice(body.tool_choice, disableToolPrefix);
   }
 
   // response_format: inject JSON structured output instruction into system prompt.
@@ -417,7 +437,7 @@ function getContentBlocksFromMessage(msg, toolNameMap = new Map(), disableToolPr
   if (msg.role === "tool") {
     // T02: Strip empty text blocks from nested tool_result content to avoid Anthropic 400
     const toolContent = Array.isArray(msg.content)
-      ? stripEmptyTextBlocks(msg.content)
+      ? rewriteTextBlocksRecursively(stripEmptyTextBlocks(msg.content), disableToolPrefix)
       : msg.content;
     blocks.push({
       type: "tool_result",
@@ -444,7 +464,7 @@ function getContentBlocksFromMessage(msg, toolNameMap = new Map(), disableToolPr
           if (!part.tool_use_id) continue;
           // T02: strip empty text blocks from nested content before passing to Anthropic
           const resultContent = Array.isArray(part.content)
-            ? stripEmptyTextBlocks(part.content)
+            ? rewriteTextBlocksRecursively(stripEmptyTextBlocks(part.content), disableToolPrefix)
             : part.content;
           blocks.push({
             type: "tool_result",
@@ -560,26 +580,36 @@ function getContentBlocksFromMessage(msg, toolNameMap = new Map(), disableToolPr
 }
 
 // Convert OpenAI tool choice to Claude format
-function convertOpenAIToolChoice(choice) {
+function convertOpenAIToolChoice(choice, disableToolPrefix = false) {
+  const mapToolChoiceName = (toolName: string) => {
+    const normalizedName = toolName.trim();
+    const rewrittenName = disableToolPrefix
+      ? normalizedName
+      : rewriteClaudeOAuthToolName(normalizedName);
+    return disableToolPrefix ? rewrittenName : `${CLAUDE_OAUTH_TOOL_PREFIX}${rewrittenName}`;
+  };
+
   if (!choice) return { type: "auto" };
   if (typeof choice === "object" && choice.type) {
     // OpenAI sends {type: "function", function: {name}} — convert to Claude {type: "tool", name}
     if (choice.type === "function" && choice.function?.name) {
-      return { type: "tool", name: choice.function.name };
+      return { type: "tool", name: mapToolChoiceName(choice.function.name) };
     }
     // Map OpenAI string types to Claude equivalents
     if (choice.type === "auto" || choice.type === "none") return { type: "auto" };
     if (choice.type === "required" || choice.type === "any")
       return { type: CLAUDE_TOOL_CHOICE_REQUIRED };
     // If type is "tool" already (Claude-native), pass through
-    if (choice.type === "tool" && choice.name) return choice;
+    if (choice.type === "tool" && choice.name) {
+      return { ...choice, name: mapToolChoiceName(choice.name) };
+    }
     // Fallback: unknown object type — default to auto to avoid 400 errors
     return { type: "auto" };
   }
   if (choice === "auto" || choice === "none") return { type: "auto" };
   if (choice === "required") return { type: CLAUDE_TOOL_CHOICE_REQUIRED };
   if (typeof choice === "object" && choice.function) {
-    return { type: "tool", name: choice.function.name };
+    return { type: "tool", name: mapToolChoiceName(choice.function.name) };
   }
   return { type: "auto" };
 }

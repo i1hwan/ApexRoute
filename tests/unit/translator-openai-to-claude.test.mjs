@@ -8,9 +8,24 @@ const {
   openaiToClaudeRequestForAntigravity,
   stripEmptyTextBlocks,
 } = await import("../../open-sse/translator/request/openai-to-claude.ts");
+const {
+  getDefaultForwardingKeywordConfig,
+  getForwardingKeywordRulesForLane,
+  setForwardingKeywordConfig,
+  rewriteForwardedTextForLane,
+  rewriteForwardedToolNameForLane,
+} = await import("../../open-sse/config/forwardingKeywordRules.ts");
+const { translateNonStreamingResponse } =
+  await import("../../open-sse/handlers/responseTranslator.ts");
+const { claudeToOpenAIResponse } =
+  await import("../../open-sse/translator/response/claude-to-openai.ts");
 const { CLAUDE_SYSTEM_PROMPT } = await import("../../open-sse/config/constants.ts");
 const { DEFAULT_THINKING_CLAUDE_SIGNATURE } =
   await import("../../open-sse/config/defaultThinkingSignature.ts");
+
+test.beforeEach(() => {
+  setForwardingKeywordConfig(getDefaultForwardingKeywordConfig());
+});
 
 test("OpenAI -> Claude helpers normalize array content and strip empty nested text blocks", () => {
   const normalized = normalizeContentToString([
@@ -223,7 +238,10 @@ test("OpenAI -> Claude maps tool_choice and injects response_format instructions
     false
   );
 
-  assert.deepEqual(jsonObjectResult.tool_choice, { type: "tool", name: "emit_json" });
+  assert.deepEqual(jsonObjectResult.tool_choice, {
+    type: "tool",
+    name: `${CLAUDE_OAUTH_TOOL_PREFIX}emit_json`,
+  });
   assert.match(jsonObjectResult.system[1].text, /Respond ONLY with a JSON object/i);
 });
 
@@ -347,6 +365,7 @@ test("OpenAI -> Claude rewrites confirmed lexical triggers only on the prefixed 
           },
         },
       ],
+      tool_choice: { type: "function", function: { name: "background_cancel" } },
     },
     false
   );
@@ -358,6 +377,10 @@ test("OpenAI -> Claude rewrites confirmed lexical triggers only on the prefixed 
   assert.doesNotMatch(oauthResult.system[1].text, /background_cancel/);
   assert.doesNotMatch(oauthResult.system[1].text, /<directories>/);
   assert.equal(oauthResult.tools[0].name, `${CLAUDE_OAUTH_TOOL_PREFIX}background_stop`);
+  assert.deepEqual(oauthResult.tool_choice, {
+    type: "tool",
+    name: `${CLAUDE_OAUTH_TOOL_PREFIX}background_stop`,
+  });
   assert.equal(
     oauthResult._toolNameMap.get(`${CLAUDE_OAUTH_TOOL_PREFIX}background_stop`),
     "background_cancel"
@@ -388,6 +411,7 @@ test("OpenAI -> Claude rewrites confirmed lexical triggers only on the prefixed 
           },
         },
       ],
+      tool_choice: { type: "function", function: { name: "background_cancel" } },
     },
     false
   );
@@ -395,4 +419,126 @@ test("OpenAI -> Claude rewrites confirmed lexical triggers only on the prefixed 
   assert.match(passthroughResult.system[1].text, /background_output/);
   assert.match(passthroughResult.system[1].text, /<directories>src\/<\/directories>/);
   assert.equal(passthroughResult.tools[0].name, "background_cancel");
+  assert.deepEqual(passthroughResult.tool_choice, { type: "tool", name: "background_cancel" });
+});
+
+test("Forwarding keyword rules stay proxy-local and data-driven", () => {
+  const rules = getForwardingKeywordRulesForLane("claude-oauth-prefixed");
+
+  assert.deepEqual(
+    rules.toolNames.map((rule) => [rule.match, rule.replace]),
+    [
+      ["background_output", "background_result"],
+      ["background_cancel", "background_stop"],
+    ]
+  );
+  assert.equal(
+    rewriteForwardedToolNameForLane("claude-oauth-prefixed", "background_output"),
+    "background_result"
+  );
+  assert.equal(rewriteForwardedToolNameForLane("claude-oauth-prefixed", "read_file"), "read_file");
+  assert.equal(
+    rewriteForwardedTextForLane(
+      "claude-oauth-prefixed",
+      "background_cancel <directories>src/</directories>"
+    ),
+    "background_stop directories:\nsrc/"
+  );
+});
+
+test("OpenAI-compatible -> Claude -> OpenAI-compatible preserves original tool names", () => {
+  const request = openaiToClaudeRequest(
+    "claude-4-sonnet",
+    {
+      messages: [{ role: "user", content: "Run the tool" }],
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "background_cancel",
+            description: "Cancel work",
+            parameters: { type: "object", properties: {} },
+          },
+        },
+      ],
+    },
+    false
+  );
+
+  const nonStreamingResponse = translateNonStreamingResponse(
+    {
+      id: "msg_1",
+      model: "claude-4-sonnet",
+      content: [{ type: "tool_use", id: "call_1", name: request.tools[0].name, input: {} }],
+      usage: { input_tokens: 10, output_tokens: 5 },
+    },
+    "claude",
+    "openai",
+    request._toolNameMap
+  );
+
+  assert.equal(
+    nonStreamingResponse.choices[0].message.tool_calls[0].function.name,
+    "background_cancel"
+  );
+
+  const streamingChunks = claudeToOpenAIResponse(
+    {
+      type: "content_block_start",
+      index: 0,
+      content_block: { type: "tool_use", id: "call_1", name: "proxy_background_result" },
+    },
+    {
+      toolCallIndex: 0,
+      toolCalls: new Map(),
+      toolNameMap: new Map([["proxy_background_result", "background_output"]]),
+    }
+  );
+
+  assert.equal(
+    streamingChunks[0].choices[0].delta.tool_calls[0].function.name,
+    "background_output"
+  );
+});
+
+test("OpenAI -> Claude rewrites nested tool_result text on the prefixed OAuth lane", () => {
+  const result = openaiToClaudeRequest(
+    "claude-4-sonnet",
+    {
+      messages: [
+        {
+          role: "assistant",
+          tool_calls: [
+            {
+              id: "call_1",
+              type: "function",
+              function: { name: "background_output", arguments: "{}" },
+            },
+          ],
+        },
+        {
+          role: "tool",
+          tool_call_id: "call_1",
+          content: [
+            {
+              type: "text",
+              text: "background_output <directories>src/</directories>",
+            },
+          ],
+        },
+      ],
+    },
+    false
+  );
+
+  const toolResultMessage = result.messages.find(
+    (message) =>
+      message.role === "user" && message.content.some((block) => block.type === "tool_result")
+  );
+
+  assert.deepEqual(toolResultMessage.content[0], {
+    type: "tool_result",
+    tool_use_id: "call_1",
+    content: [{ type: "text", text: "background_result directories:\nsrc/" }],
+  });
 });
