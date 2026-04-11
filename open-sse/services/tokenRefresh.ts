@@ -1,4 +1,3 @@
-import { CLAUDE_CONFIG } from "@/lib/oauth/constants/oauth";
 import { PROVIDERS, OAUTH_ENDPOINTS } from "../config/constants.ts";
 import { pbkdf2Sync } from "node:crypto";
 import { runWithProxyContext } from "../utils/proxyFetch.ts";
@@ -223,71 +222,23 @@ export async function refreshKimiCodingToken(refreshToken, log, proxyConfig = nu
  */
 export async function refreshClaudeOAuthToken(refreshToken, log, proxyConfig = null) {
   try {
-    const payload = {
+    const params = new URLSearchParams({
       grant_type: "refresh_token",
       refresh_token: refreshToken,
       client_id: PROVIDERS.claude.clientId,
-      scope: CLAUDE_CONFIG.scopes.join(" "),
-    };
+    });
 
-    const makeRequest = (contentType, extraHeaders = {}) =>
-      runWithProxyContext(proxyConfig, () =>
-        fetch(OAUTH_ENDPOINTS.anthropic.token, {
-          method: "POST",
-          headers: {
-            "Content-Type": contentType,
-            Accept: "application/json",
-            ...extraHeaders,
-          },
-          body:
-            contentType === "application/json"
-              ? JSON.stringify(payload)
-              : new URLSearchParams(payload).toString(),
-        })
-      );
-
-    let response = await makeRequest("application/json");
-
-    if (!response.ok) {
-      const initialErrorText = await response.text();
-      const shouldRetry =
-        response.status === 400 && /invalid request format/i.test(initialErrorText || "");
-
-      if (!shouldRetry) {
-        log?.error?.("TOKEN_REFRESH", "Failed to refresh Claude OAuth token", {
-          status: response.status,
-          error: initialErrorText,
-        });
-        return null;
-      }
-
-      log?.warn?.(
-        "TOKEN_REFRESH",
-        "Claude OAuth refresh rejected base JSON contract, retrying alternate formats"
-      );
-
-      response = await makeRequest("application/json", { "User-Agent": "anthropic" });
-
-      if (!response.ok) {
-        const secondErrorText = await response.text();
-        const shouldRetryAsForm =
-          response.status === 400 && /invalid request format/i.test(secondErrorText || "");
-
-        if (!shouldRetryAsForm) {
-          log?.error?.("TOKEN_REFRESH", "Failed to refresh Claude OAuth token", {
-            status: response.status,
-            error: secondErrorText,
-          });
-          return null;
-        }
-
-        log?.warn?.(
-          "TOKEN_REFRESH",
-          "Claude OAuth refresh rejected JSON retry, retrying as form-encoded"
-        );
-        response = await makeRequest("application/x-www-form-urlencoded");
-      }
-    }
+    const response = await runWithProxyContext(proxyConfig, () =>
+      fetch(OAUTH_ENDPOINTS.anthropic.token, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Accept: "application/json",
+          "anthropic-beta": "oauth-2025-04-20",
+        },
+        body: params.toString(),
+      })
+    );
 
     if (!response.ok) {
       const errorText = await response.text();
