@@ -1,3 +1,4 @@
+import { CLAUDE_CONFIG } from "@/lib/oauth/constants/oauth";
 import { PROVIDERS, OAUTH_ENDPOINTS } from "../config/constants.ts";
 import { pbkdf2Sync } from "node:crypto";
 import { runWithProxyContext } from "../utils/proxyFetch.ts";
@@ -226,6 +227,7 @@ export async function refreshClaudeOAuthToken(refreshToken, log, proxyConfig = n
       grant_type: "refresh_token",
       refresh_token: refreshToken,
       client_id: PROVIDERS.claude.clientId,
+      scope: CLAUDE_CONFIG.scopes.join(" "),
     };
 
     const makeRequest = (contentType, extraHeaders = {}) =>

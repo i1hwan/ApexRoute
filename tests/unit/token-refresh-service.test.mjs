@@ -310,6 +310,8 @@ test("refreshClaudeOAuthToken first matches Claude auth exchange token contract"
     grant_type: "refresh_token",
     refresh_token: "claude-refresh",
     client_id: PROVIDERS.claude.clientId,
+    scope:
+      "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers",
   });
 });
 
@@ -352,6 +354,7 @@ test("refreshClaudeOAuthToken retries with user-agent JSON then form when format
   assert.equal(calls[2].options.headers["Content-Type"], "application/x-www-form-urlencoded");
   assert.match(calls[2].options.body, /grant_type=refresh_token/);
   assert.match(calls[2].options.body, /client_id=/);
+  assert.match(calls[2].options.body, /scope=org%3Acreate_api_key/);
 });
 
 test("refreshGoogleToken exchanges refresh tokens against the shared google endpoint", async () => {
