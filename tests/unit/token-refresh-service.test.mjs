@@ -279,7 +279,7 @@ test("refreshKimiCodingToken adds provider-specific headers and fields", async (
   assert.match(bodyToString(calls[0].options.body), /grant_type=refresh_token/);
 });
 
-test("refreshClaudeOAuthToken matches Claude token exchange request shape without extra fields", async () => {
+test("refreshClaudeOAuthToken matches OmniRoute Claude refresh contract and emits redacted request details", async () => {
   const log = createLog();
   const calls = [];
 
@@ -303,13 +303,28 @@ test("refreshClaudeOAuthToken matches Claude token exchange request shape withou
   );
 
   assert.equal(calls[0].url, OAUTH_ENDPOINTS.anthropic.token);
-  assert.equal(calls[0].options.headers["Content-Type"], "application/json");
-  assert.equal(calls[0].options.headers["anthropic-beta"], undefined);
+  assert.equal(calls[0].options.headers["Content-Type"], "application/x-www-form-urlencoded");
+  assert.equal(calls[0].options.headers["anthropic-beta"], "oauth-2025-04-20");
   assert.equal(calls[0].options.headers["User-Agent"], undefined);
-  assert.deepEqual(JSON.parse(bodyToString(calls[0].options.body)), {
-    grant_type: "refresh_token",
-    refresh_token: "claude-refresh",
-    client_id: PROVIDERS.claude.clientId,
+  assert.equal(
+    bodyToString(calls[0].options.body),
+    `grant_type=refresh_token&refresh_token=claude-refresh&client_id=${encodeURIComponent(PROVIDERS.claude.clientId)}`
+  );
+
+  const detailLog = log.entries.find(
+    (entry) => entry.level === "warn" && entry.message === "Claude OAuth refresh request details"
+  );
+  assert.deepEqual(detailLog?.meta, {
+    method: "POST",
+    url: OAUTH_ENDPOINTS.anthropic.token,
+    contentType: "application/x-www-form-urlencoded",
+    accept: "application/json",
+    anthropicBeta: "oauth-2025-04-20",
+    bodyFormat: "form-urlencoded",
+    bodyKeys: ["grant_type", "refresh_token", "client_id"],
+    clientId: PROVIDERS.claude.clientId || null,
+    refreshTokenLength: "claude-refresh".length,
+    hasProxyConfig: null,
   });
 });
 
@@ -335,11 +350,11 @@ test("refreshClaudeOAuthToken returns null on invalid Claude refresh contract re
   );
 
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].options.headers["Content-Type"], "application/json");
-  assert.equal(calls[0].options.headers["anthropic-beta"], undefined);
+  assert.equal(calls[0].options.headers["Content-Type"], "application/x-www-form-urlencoded");
+  assert.equal(calls[0].options.headers["anthropic-beta"], "oauth-2025-04-20");
   assert.equal(
     log.entries.some((entry) => entry.level === "warn"),
-    false
+    true
   );
   assert.equal(
     log.entries.some(
