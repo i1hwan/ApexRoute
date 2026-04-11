@@ -58,9 +58,6 @@ vitest.config.ts
 vitest.mcp.config.ts
 eslint.config.mjs
 prettier.config.mjs
-tsconfig.json
-tsconfig.typecheck-core.json
-tsconfig.typecheck-noimplicit-core.json
 llm.txt
 
 # VS Code extension (separate project)
