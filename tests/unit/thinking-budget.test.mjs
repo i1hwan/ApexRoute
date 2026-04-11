@@ -141,8 +141,35 @@ test("ADAPTIVE: Claude requests use configured effort when client does not send 
     messages: [{ role: "user", content: "hello" }],
   };
   const result = applyThinkingBudget(body);
+  assert.equal(result.thinking, undefined);
+  assert.equal(result.output_config, undefined);
+  setThinkingBudgetConfig(DEFAULT_THINKING_CONFIG);
+});
+
+test("ADAPTIVE: Claude requests preserve explicit thinking config", () => {
+  setThinkingBudgetConfig({ mode: ThinkingMode.ADAPTIVE, effortLevel: "max" });
+  const body = {
+    model: "claude-opus-4-6",
+    messages: [{ role: "user", content: "hello" }],
+    reasoning_effort: "max",
+    thinking: { type: "enabled", budget_tokens: 4096 },
+  };
+  const result = applyThinkingBudget(body);
+  assert.deepEqual(result.thinking, { type: "enabled", budget_tokens: 4096 });
+  assert.equal(result.output_config, undefined);
+  setThinkingBudgetConfig(DEFAULT_THINKING_CONFIG);
+});
+
+test("ADAPTIVE: Claude requests preserve xhigh effort values", () => {
+  setThinkingBudgetConfig({ mode: ThinkingMode.ADAPTIVE, effortLevel: "max" });
+  const body = {
+    model: "claude-opus-4-6",
+    messages: [{ role: "user", content: "hello" }],
+    reasoning_effort: "xhigh",
+  };
+  const result = applyThinkingBudget(body);
   assert.deepEqual(result.thinking, { type: "adaptive" });
-  assert.deepEqual(result.output_config, { effort: "max" });
+  assert.deepEqual(result.output_config, { effort: "xhigh" });
   setThinkingBudgetConfig(DEFAULT_THINKING_CONFIG);
 });
 

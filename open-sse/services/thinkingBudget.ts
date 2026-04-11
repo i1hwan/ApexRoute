@@ -175,7 +175,11 @@ export function applyThinkingBudget(body, config = null) {
   processed = ensureThinkingConfig(processed);
 
   if (isClaudeModel(modelStr) && cfg.mode === ThinkingMode.ADAPTIVE) {
-    return setAdaptiveClaudeThinking(processed, cfg);
+    if (!hasExplicitThinkingConfig(processed) && hasExplicitEffortSignal(processed)) {
+      return setAdaptiveClaudeThinking(processed, cfg);
+    }
+
+    return processed;
   }
 
   switch (cfg.mode) {
@@ -200,26 +204,22 @@ function isClaudeModel(model) {
   return typeof model === "string" && model.toLowerCase().includes("claude");
 }
 
+function hasExplicitThinkingConfig(body) {
+  return Boolean(body?.thinking);
+}
+
+function hasExplicitEffortSignal(body) {
+  return Boolean(body?.output_config?.effort || body?.reasoning?.effort || body?.reasoning_effort);
+}
+
 function resolveAnthropicEffort(body, cfg) {
   const rawEffort =
     body?.output_config?.effort ||
     body?.reasoning?.effort ||
     body?.reasoning_effort ||
-    cfg.effortLevel;
-  const normalized = String(rawEffort || "").toLowerCase();
-
-  if (
-    normalized === "low" ||
-    normalized === "medium" ||
-    normalized === "high" ||
-    normalized === "max"
-  ) {
-    return normalized;
-  }
-  if (normalized === "none" || normalized === "disabled") {
-    return "low";
-  }
-  return cfg.effortLevel || "max";
+    cfg.effortLevel ||
+    "max";
+  return String(rawEffort || cfg.effortLevel || "max").toLowerCase();
 }
 
 function setAdaptiveClaudeThinking(body, cfg) {
