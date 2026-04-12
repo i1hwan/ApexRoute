@@ -172,6 +172,32 @@ export function filterUsageForFormat(usage, targetFormat) {
     ) {
       convertedUsage.total_tokens = convertedUsage.prompt_tokens + convertedUsage.completion_tokens;
     }
+
+    // Promote flat Claude-style cache tokens → nested OpenAI prompt_tokens_details.
+    // In passthrough mode, the usage object carries cache_read_input_tokens and
+    // cache_creation_input_tokens as flat keys. OpenAI clients expect these inside
+    // prompt_tokens_details.cached_tokens / .cache_creation_tokens.
+    const cacheRead = Number(convertedUsage.cache_read_input_tokens) || 0;
+    const cacheCreation = Number(convertedUsage.cache_creation_input_tokens) || 0;
+    if ((cacheRead > 0 || cacheCreation > 0) && !convertedUsage.prompt_tokens_details) {
+      const details: Record<string, number> = {};
+      if (cacheRead > 0) details.cached_tokens = cacheRead;
+      if (cacheCreation > 0) details.cache_creation_tokens = cacheCreation;
+      convertedUsage.prompt_tokens_details = details;
+    }
+
+    // Promote flat cached_tokens → nested prompt_tokens_details.cached_tokens
+    // (some providers set cached_tokens at the top level without nesting)
+    const flatCached = Number(convertedUsage.cached_tokens) || 0;
+    if (flatCached > 0 && !convertedUsage.prompt_tokens_details) {
+      convertedUsage.prompt_tokens_details = { cached_tokens: flatCached };
+    }
+
+    // Promote flat reasoning_tokens → nested completion_tokens_details.reasoning_tokens
+    const flatReasoning = Number(convertedUsage.reasoning_tokens) || 0;
+    if (flatReasoning > 0 && !convertedUsage.completion_tokens_details) {
+      convertedUsage.completion_tokens_details = { reasoning_tokens: flatReasoning };
+    }
   }
 
   // Helper to pick only defined fields from usage

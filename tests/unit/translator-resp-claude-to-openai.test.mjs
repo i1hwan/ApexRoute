@@ -231,3 +231,186 @@ test("Claude stream: message_stop falls back to tool_calls when tool use already
 test("Claude stream: unsupported events return null", () => {
   assert.equal(claudeToOpenAIResponse({ type: "error" }, createState()), null);
 });
+
+test("Claude stream: message_start captures cache tokens from initial usage", () => {
+  const state = createState();
+  claudeToOpenAIResponse(
+    {
+      type: "message_start",
+      message: {
+        id: "msg_cache",
+        model: "claude-sonnet-4-20250514",
+        usage: {
+          input_tokens: 26,
+          output_tokens: 0,
+          cache_read_input_tokens: 91945,
+          cache_creation_input_tokens: 152,
+        },
+      },
+    },
+    state
+  );
+
+  assert.equal(state.usage.input_tokens, 26);
+  assert.equal(state.usage.cache_read_input_tokens, 91945);
+  assert.equal(state.usage.cache_creation_input_tokens, 152);
+});
+
+test("Claude stream: message_delta merges output_tokens with existing cache tokens from message_start", () => {
+  const state = createState();
+  claudeToOpenAIResponse(
+    {
+      type: "message_start",
+      message: {
+        id: "msg_merge",
+        model: "claude-sonnet-4-20250514",
+        usage: {
+          input_tokens: 26,
+          output_tokens: 0,
+          cache_read_input_tokens: 91945,
+          cache_creation_input_tokens: 152,
+        },
+      },
+    },
+    state
+  );
+
+  const result = claudeToOpenAIResponse(
+    {
+      type: "message_delta",
+      delta: { stop_reason: "end_turn" },
+      usage: { output_tokens: 603 },
+    },
+    state
+  );
+
+  assert.equal(result[0].usage.prompt_tokens, 26 + 91945 + 152);
+  assert.equal(result[0].usage.completion_tokens, 603);
+  assert.equal(result[0].usage.total_tokens, 26 + 91945 + 152 + 603);
+  assert.equal(result[0].usage.prompt_tokens_details.cached_tokens, 91945);
+  assert.equal(result[0].usage.prompt_tokens_details.cache_creation_tokens, 152);
+});
+
+test("Claude stream: message_stop fallback includes cache tokens in prompt_tokens_details", () => {
+  const state = createState();
+  claudeToOpenAIResponse(
+    {
+      type: "message_start",
+      message: {
+        id: "msg_stop",
+        model: "claude-sonnet-4-20250514",
+        usage: {
+          input_tokens: 50,
+          output_tokens: 0,
+          cache_read_input_tokens: 1000,
+          cache_creation_input_tokens: 200,
+        },
+      },
+    },
+    state
+  );
+
+  claudeToOpenAIResponse(
+    {
+      type: "content_block_start",
+      index: 0,
+      content_block: { type: "text" },
+    },
+    state
+  );
+  claudeToOpenAIResponse(
+    {
+      type: "content_block_delta",
+      index: 0,
+      delta: { type: "text_delta", text: "Hello" },
+    },
+    state
+  );
+  claudeToOpenAIResponse({ type: "content_block_stop", index: 0 }, state);
+
+  // message_delta carries output_tokens but no stop_reason
+  claudeToOpenAIResponse(
+    {
+      type: "message_delta",
+      delta: {},
+      usage: { output_tokens: 100 },
+    },
+    state
+  );
+
+  // message_stop emits the final chunk (fallback path since no stop_reason in delta)
+  const result = claudeToOpenAIResponse({ type: "message_stop" }, state);
+
+  assert.ok(result, "message_stop should emit a chunk");
+  assert.equal(result[0].usage.prompt_tokens, 50 + 1000 + 200);
+  assert.equal(result[0].usage.completion_tokens, 100);
+  assert.equal(result[0].usage.total_tokens, 50 + 1000 + 200 + 100);
+  assert.equal(result[0].usage.prompt_tokens_details.cached_tokens, 1000);
+  assert.equal(result[0].usage.prompt_tokens_details.cache_creation_tokens, 200);
+});
+
+test("Claude non-stream: cache tokens appear in prompt_tokens_details", () => {
+  const result = translateNonStreamingResponse(
+    {
+      id: "msg_cached",
+      model: "claude-sonnet-4-20250514",
+      content: [{ type: "text", text: "Answer" }],
+      stop_reason: "end_turn",
+      usage: {
+        input_tokens: 26,
+        output_tokens: 603,
+        cache_read_input_tokens: 91945,
+        cache_creation_input_tokens: 152,
+      },
+    },
+    FORMATS.CLAUDE,
+    FORMATS.OPENAI
+  );
+
+  assert.equal(result.usage.prompt_tokens, 26 + 91945 + 152);
+  assert.equal(result.usage.completion_tokens, 603);
+  assert.equal(result.usage.total_tokens, 26 + 91945 + 152 + 603);
+  assert.deepEqual(result.usage.prompt_tokens_details, {
+    cached_tokens: 91945,
+    cache_creation_tokens: 152,
+  });
+});
+
+test("filterUsageForFormat promotes flat Claude cache tokens to OpenAI nested details", async () => {
+  const { filterUsageForFormat } = await import("../../open-sse/utils/usageTracking.ts");
+  const { FORMATS: FMT } = await import("../../open-sse/translator/formats.ts");
+
+  const claudeUsage = {
+    prompt_tokens: 92123,
+    completion_tokens: 603,
+    total_tokens: 92726,
+    cache_read_input_tokens: 91945,
+    cache_creation_input_tokens: 152,
+  };
+
+  const filtered = filterUsageForFormat(claudeUsage, FMT.OPENAI);
+
+  assert.equal(filtered.prompt_tokens, 92123);
+  assert.equal(filtered.completion_tokens, 603);
+  assert.equal(filtered.total_tokens, 92726);
+  assert.equal(filtered.prompt_tokens_details.cached_tokens, 91945);
+  assert.equal(filtered.prompt_tokens_details.cache_creation_tokens, 152);
+  assert.equal(filtered.cache_read_input_tokens, undefined);
+  assert.equal(filtered.cache_creation_input_tokens, undefined);
+});
+
+test("filterUsageForFormat promotes flat reasoning_tokens to completion_tokens_details", async () => {
+  const { filterUsageForFormat } = await import("../../open-sse/utils/usageTracking.ts");
+  const { FORMATS: FMT } = await import("../../open-sse/translator/formats.ts");
+
+  const usage = {
+    prompt_tokens: 100,
+    completion_tokens: 500,
+    total_tokens: 600,
+    reasoning_tokens: 200,
+  };
+
+  const filtered = filterUsageForFormat(usage, FMT.OPENAI);
+
+  assert.equal(filtered.completion_tokens_details.reasoning_tokens, 200);
+});
