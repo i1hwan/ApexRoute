@@ -413,4 +413,5 @@ test("filterUsageForFormat promotes flat reasoning_tokens to completion_tokens_d
   const filtered = filterUsageForFormat(usage, FMT.OPENAI);
 
   assert.equal(filtered.completion_tokens_details.reasoning_tokens, 200);
+  assert.equal(filtered.reasoning_tokens, undefined);
 });
