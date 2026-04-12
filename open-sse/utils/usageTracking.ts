@@ -256,12 +256,12 @@ export function filterUsageForFormat(usage, targetFormat) {
       "estimated",
     ],
     // OpenAI format (default for OPENAI, CODEX, KIRO, etc.)
+    // Flat cached_tokens / reasoning_tokens are promoted into nested *_details
+    // objects upstream and deleted, so they are not listed here.
     default: [
       "prompt_tokens",
       "completion_tokens",
       "total_tokens",
-      "cached_tokens",
-      "reasoning_tokens",
       "prompt_tokens_details",
       "completion_tokens_details",
       "estimated",

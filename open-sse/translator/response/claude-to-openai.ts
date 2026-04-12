@@ -43,20 +43,26 @@ export function claudeToOpenAIResponse(chunk, state) {
 
       if (chunk.message?.usage && typeof chunk.message.usage === "object") {
         const u = chunk.message.usage;
-        state.usage = {
-          input_tokens: u.input_tokens || 0,
+        const inputTokens = u.input_tokens || 0;
+        const cacheRead = u.cache_read_input_tokens || 0;
+        const cacheCreation = u.cache_creation_input_tokens || 0;
+        const promptTokens = inputTokens + cacheRead + cacheCreation;
+
+        const incoming: Record<string, number> = {
+          input_tokens: inputTokens,
           output_tokens: u.output_tokens || 0,
-          prompt_tokens: u.input_tokens || 0,
+          prompt_tokens: promptTokens,
           completion_tokens: u.output_tokens || 0,
         };
-        if (typeof u.cache_read_input_tokens === "number" && u.cache_read_input_tokens > 0) {
-          state.usage.cache_read_input_tokens = u.cache_read_input_tokens;
-        }
-        if (
-          typeof u.cache_creation_input_tokens === "number" &&
-          u.cache_creation_input_tokens > 0
-        ) {
-          state.usage.cache_creation_input_tokens = u.cache_creation_input_tokens;
+        if (cacheRead > 0) incoming.cache_read_input_tokens = cacheRead;
+        if (cacheCreation > 0) incoming.cache_creation_input_tokens = cacheCreation;
+
+        if (!state.usage) {
+          state.usage = incoming;
+        } else {
+          for (const key of Object.keys(incoming)) {
+            if (incoming[key] > 0) (state.usage as Record<string, number>)[key] = incoming[key];
+          }
         }
       }
 
@@ -148,20 +154,21 @@ export function claudeToOpenAIResponse(chunk, state) {
 
         if (!state.usage) state.usage = {};
 
-        if (inputTokens > 0) {
-          state.usage.prompt_tokens = inputTokens;
-          state.usage.input_tokens = inputTokens;
-        }
         if (outputTokens > 0) {
           state.usage.completion_tokens = outputTokens;
           state.usage.output_tokens = outputTokens;
         }
-
         if (cacheReadTokens > 0) {
           state.usage.cache_read_input_tokens = cacheReadTokens;
         }
         if (cacheCreationTokens > 0) {
           state.usage.cache_creation_input_tokens = cacheCreationTokens;
+        }
+        if (inputTokens > 0) {
+          state.usage.input_tokens = inputTokens;
+          const cr = state.usage.cache_read_input_tokens || 0;
+          const cc = state.usage.cache_creation_input_tokens || 0;
+          state.usage.prompt_tokens = inputTokens + cr + cc;
         }
       }
 
