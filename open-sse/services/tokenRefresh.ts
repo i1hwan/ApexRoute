@@ -16,6 +16,22 @@ function getRefreshCacheKey(provider, refreshToken) {
   return `${provider}:${tokenHash}`;
 }
 
+function buildClaudeRefreshRequestMeta(refreshToken, headers, body, hasProxyConfig) {
+  return {
+    method: "POST",
+    url: OAUTH_ENDPOINTS.anthropic.token,
+    contentType: headers["Content-Type"],
+    accept: headers.Accept,
+    anthropicBeta: headers["anthropic-beta"] || null,
+    bodyFormat:
+      headers["Content-Type"] === "application/x-www-form-urlencoded" ? "form-urlencoded" : "json",
+    bodyKeys: body instanceof URLSearchParams ? Array.from(body.keys()) : Object.keys(body || {}),
+    clientId: PROVIDERS.claude.clientId || null,
+    refreshTokenLength: typeof refreshToken === "string" ? refreshToken.length : 0,
+    hasProxyConfig: hasProxyConfig,
+  };
+}
+
 /**
  * Refresh OAuth access token using refresh token
  */
@@ -222,20 +238,27 @@ export async function refreshKimiCodingToken(refreshToken, log, proxyConfig = nu
  */
 export async function refreshClaudeOAuthToken(refreshToken, log, proxyConfig = null) {
   try {
+    const headers = {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Accept: "application/json",
+      "anthropic-beta": "oauth-2025-04-20",
+    };
     const params = new URLSearchParams({
       grant_type: "refresh_token",
       refresh_token: refreshToken,
       client_id: PROVIDERS.claude.clientId,
     });
 
+    log?.warn?.(
+      "TOKEN_REFRESH",
+      "Claude OAuth refresh request details",
+      buildClaudeRefreshRequestMeta(refreshToken, headers, params, proxyConfig)
+    );
+
     const response = await runWithProxyContext(proxyConfig, () =>
       fetch(OAUTH_ENDPOINTS.anthropic.token, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          Accept: "application/json",
-          "anthropic-beta": "oauth-2025-04-20",
-        },
+        headers,
         body: params.toString(),
       })
     );
