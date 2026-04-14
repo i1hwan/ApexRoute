@@ -584,9 +584,9 @@ export function createSSEStream(options: StreamOptions = {}) {
             }
           }
 
-          // Extract usage — merge rather than overwrite so that cache tokens
-          // from message_start survive the later message_delta which only
-          // carries output_tokens.
+          // Extract usage — merge rather than overwrite so that usage fields
+          // from message_start survive later message_delta events, which
+          // typically carry output_tokens but may also include other usage fields.
           const extracted = extractUsage(parsed);
           if (extracted) {
             if (!state.usage) {
