@@ -193,7 +193,7 @@ test("createSSEStream translate mode converts Claude SSE into OpenAI chunks and 
   assert.equal(onCompletePayload.status, 200);
   assert.equal(onCompletePayload.responseBody.choices[0].message.content, "Hello Claude");
   assert.equal(onCompletePayload.responseBody.usage.completion_tokens, 4);
-  assert.equal(onCompletePayload.responseBody.usage.total_tokens, 4);
+  assert.equal(onCompletePayload.responseBody.usage.total_tokens, 7);
 });
 
 test("createSSEStream passthrough preserves Responses API events and completion summaries", async () => {
@@ -508,7 +508,7 @@ test("createSSETransformStreamWithLogger flushes a trailing Claude usage event w
   assert.match(text, /\[DONE\]/);
   assert.equal(onCompletePayload.responseBody.choices[0].message.content, "Buffered tail");
   assert.equal(onCompletePayload.responseBody.usage.completion_tokens, 5);
-  assert.equal(onCompletePayload.responseBody.usage.total_tokens, 5);
+  assert.equal(onCompletePayload.responseBody.usage.total_tokens, 8);
 });
 
 test("buildStreamSummaryFromEvents compacts Responses API deltas into a synthetic response", () => {

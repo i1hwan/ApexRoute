@@ -584,9 +584,21 @@ export function createSSEStream(options: StreamOptions = {}) {
             }
           }
 
-          // Extract usage
+          // Extract usage — merge rather than overwrite so that usage fields
+          // from message_start survive later message_delta events, which
+          // typically carry output_tokens but may also include other usage fields.
           const extracted = extractUsage(parsed);
-          if (extracted) state.usage = extracted; // Keep original usage for logging
+          if (extracted) {
+            if (!state.usage) {
+              state.usage = extracted;
+            } else {
+              const su = state.usage as Record<string, number>;
+              const eu = extracted as Record<string, number>;
+              for (const key of Object.keys(eu)) {
+                if (eu[key] > 0) su[key] = eu[key];
+              }
+            }
+          }
 
           // Translate: targetFormat -> openai -> sourceFormat
           const translated = translateResponse(targetFormat, sourceFormat, parsed, state);
@@ -775,15 +787,9 @@ export function createSSEStream(options: StreamOptions = {}) {
                 } else {
                   const su = state.usage as Record<string, number>;
                   const eu = extracted as Record<string, number>;
-                  if (eu.prompt_tokens > 0) su.prompt_tokens = eu.prompt_tokens;
-                  if (eu.completion_tokens > 0) su.completion_tokens = eu.completion_tokens;
-                  if (eu.total_tokens > 0) su.total_tokens = eu.total_tokens;
-                  if (eu.cache_read_input_tokens > 0)
-                    su.cache_read_input_tokens = eu.cache_read_input_tokens;
-                  if (eu.cache_creation_input_tokens > 0)
-                    su.cache_creation_input_tokens = eu.cache_creation_input_tokens;
-                  if (eu.cached_tokens > 0) su.cached_tokens = eu.cached_tokens;
-                  if (eu.reasoning_tokens > 0) su.reasoning_tokens = eu.reasoning_tokens;
+                  for (const key of Object.keys(eu)) {
+                    if (eu[key] > 0) su[key] = eu[key];
+                  }
                 }
               }
 
