@@ -4,6 +4,9 @@
  * when clients request more than the model supports.
  */
 
+export type ThinkingMode = "enabled" | "adaptive" | "disabled";
+export type ThinkingDisplay = "summarized" | "omitted";
+
 export interface ModelSpec {
   maxOutputTokens: number;
   contextWindow?: number;
@@ -15,6 +18,11 @@ export interface ModelSpec {
   supportsThinking?: boolean;
   supportsTools?: boolean;
   supportsVision?: boolean;
+  // Opus 4.7+ model constraints
+  supportedThinkingModes?: ThinkingMode[]; // which thinking types the model accepts
+  supportedEfforts?: string[]; // valid effort levels for this model
+  defaultThinkingDisplay?: ThinkingDisplay; // default display mode for thinking blocks
+  rejectsSamplingParams?: boolean; // true if non-default temperature/top_p/top_k → 400
 }
 
 export const MODEL_SPECS: Record<string, ModelSpec> = {
@@ -69,12 +77,30 @@ export const MODEL_SPECS: Record<string, ModelSpec> = {
   // ── Claude Opus 4.6 ─────────────────────────────────────────────
   "claude-opus-4-6": {
     maxOutputTokens: 128000,
-    contextWindow: 200000,
+    contextWindow: 1048576,
     defaultThinkingBudget: 10000,
     thinkingBudgetCap: 128000,
     supportsThinking: true,
     supportsTools: true,
     supportsVision: true,
+    supportedThinkingModes: ["enabled", "adaptive", "disabled"],
+    supportedEfforts: ["low", "medium", "high", "max"],
+    defaultThinkingDisplay: "summarized",
+  },
+
+  // ── Claude Opus 4.7 ─────────────────────────────────────────────
+  "claude-opus-4-7": {
+    maxOutputTokens: 128000,
+    contextWindow: 1048576,
+    defaultThinkingBudget: 0,
+    thinkingBudgetCap: 0,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+    supportedThinkingModes: ["adaptive", "disabled"],
+    supportedEfforts: ["low", "medium", "high", "xhigh", "max"],
+    defaultThinkingDisplay: "omitted",
+    rejectsSamplingParams: true,
   },
 
   // Defaults
@@ -119,4 +145,33 @@ export function resolveModelAlias(modelId: string): string {
     if (spec.aliases?.includes(modelId)) return canonical;
   }
   return modelId;
+}
+
+export function isAdaptiveOnlyModel(modelId: string): boolean {
+  const spec = getModelSpec(modelId);
+  if (!spec?.supportedThinkingModes) return false;
+  return (
+    spec.supportedThinkingModes.includes("adaptive") &&
+    !spec.supportedThinkingModes.includes("enabled")
+  );
+}
+
+export function getDefaultThinkingDisplay(modelId: string): ThinkingDisplay | undefined {
+  return getModelSpec(modelId)?.defaultThinkingDisplay;
+}
+
+export function rejectsSamplingParams(modelId: string): boolean {
+  return getModelSpec(modelId)?.rejectsSamplingParams === true;
+}
+
+export function isEffortSupported(modelId: string, effort: string): boolean {
+  const spec = getModelSpec(modelId);
+  if (!spec?.supportedEfforts) return true;
+  return spec.supportedEfforts.includes(effort);
+}
+
+export function downgradeEffort(modelId: string, effort: string): string {
+  if (isEffortSupported(modelId, effort)) return effort;
+  if (effort === "xhigh") return "max";
+  return effort;
 }
