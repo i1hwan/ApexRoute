@@ -263,7 +263,11 @@ function coerceThinkingForModel(body, modelStr) {
     const result = { ...body };
     const currentEffort =
       result.output_config?.effort || result.reasoning_effort || result.reasoning?.effort || "high";
+    const explicitDisplay = body.thinking?.display;
     result.thinking = { type: "adaptive" };
+    if (explicitDisplay) {
+      result.thinking.display = explicitDisplay;
+    }
     result.output_config = {
       ...(result.output_config && typeof result.output_config === "object"
         ? result.output_config

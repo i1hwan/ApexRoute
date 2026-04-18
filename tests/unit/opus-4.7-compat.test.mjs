@@ -247,3 +247,50 @@ test("hasThinkingConfig — adaptive support", async (t) => {
     assert.equal(hasThinkingConfig({}), false);
   });
 });
+
+// ── Copilot review fixes ────────────────────────────────────────
+test("downgradeEffort normalizes mixed-case input", async (t) => {
+  await t.test("XHIGH on 4.6 downgrades to max", () => {
+    assert.equal(downgradeEffort("claude-opus-4-6", "XHIGH"), "max");
+  });
+
+  await t.test("High on 4.7 normalizes to high", () => {
+    assert.equal(downgradeEffort("claude-opus-4-7", "High"), "high");
+  });
+
+  await t.test("MAX on 4.6 normalizes to max", () => {
+    assert.equal(downgradeEffort("claude-opus-4-6", "MAX"), "max");
+  });
+
+  await t.test("isEffortSupported is case-insensitive", () => {
+    assert.equal(isEffortSupported("claude-opus-4-7", "XHIGH"), true);
+    assert.equal(isEffortSupported("claude-opus-4-6", "XHIGH"), false);
+  });
+});
+
+test("coerceThinkingForModel preserves explicit thinking.display", async (t) => {
+  const { setThinkingBudgetConfig } = await import("../../open-sse/services/thinkingBudget.ts");
+  setThinkingBudgetConfig({ mode: "adaptive", customBudget: 10240, effortLevel: "max" });
+
+  await t.test("explicit display:omitted survives enabled→adaptive coercion on 4.7", () => {
+    const body = {
+      model: "claude-opus-4-7",
+      thinking: { type: "enabled", budget_tokens: 10000, display: "omitted" },
+      messages: buildMessages(),
+    };
+    const result = applyThinkingBudget({ ...body });
+    assert.equal(result.thinking.type, "adaptive");
+    assert.equal(result.thinking.display, "omitted");
+  });
+
+  await t.test("no display field does not inject display in thinkingBudget layer", () => {
+    const body = {
+      model: "claude-opus-4-7",
+      thinking: { type: "enabled", budget_tokens: 10000 },
+      messages: buildMessages(),
+    };
+    const result = applyThinkingBudget({ ...body });
+    assert.equal(result.thinking.type, "adaptive");
+    assert.equal(result.thinking.display, undefined);
+  });
+});

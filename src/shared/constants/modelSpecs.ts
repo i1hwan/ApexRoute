@@ -167,11 +167,12 @@ export function rejectsSamplingParams(modelId: string): boolean {
 export function isEffortSupported(modelId: string, effort: string): boolean {
   const spec = getModelSpec(modelId);
   if (!spec?.supportedEfforts) return true;
-  return spec.supportedEfforts.includes(effort);
+  return spec.supportedEfforts.includes(effort.toLowerCase());
 }
 
 export function downgradeEffort(modelId: string, effort: string): string {
-  if (isEffortSupported(modelId, effort)) return effort;
-  if (effort === "xhigh") return "max";
-  return effort;
+  const normalized = effort.toLowerCase();
+  if (isEffortSupported(modelId, normalized)) return normalized;
+  if (normalized === "xhigh") return "max";
+  return normalized;
 }

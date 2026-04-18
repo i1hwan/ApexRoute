@@ -442,10 +442,9 @@ export function openaiToClaudeRequest(model, body, stream) {
     result.thinking.type !== "adaptive" &&
     result.thinking.type !== "disabled"
   ) {
-    const effort = result.output_config?.effort || result.thinking?.budget_tokens ? "high" : "high";
     result.thinking = { type: "adaptive" };
     if (!result.output_config?.effort) {
-      result.output_config = { ...(result.output_config || {}), effort };
+      result.output_config = { ...(result.output_config || {}), effort: "high" };
     }
   }
 
