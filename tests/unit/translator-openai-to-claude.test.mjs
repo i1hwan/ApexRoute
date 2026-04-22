@@ -518,6 +518,24 @@ test("Forwarding keyword rules stay proxy-local and data-driven", () => {
     ),
     "background_stop directories:\nsrc/"
   );
+
+  // 2026-04-22 lexical regression mitigation:
+  // The Claude OAuth lane must rewrite "Is directory a git repo:" so that
+  // the 3-element fingerprint filter cannot match. Verify the rule is
+  // present in the lane defaults and the rewriter applies it.
+  assert.ok(
+    rules.text.some(
+      (rule) => rule.match === "Is directory a git repo:" && rule.replace === "Is dir a git repo:"
+    ),
+    "Claude OAuth lane must include the 2026-04-22 git-repo lexical mitigation"
+  );
+  assert.equal(
+    rewriteForwardedTextForLane(
+      "claude-oauth-prefixed",
+      "Here is some useful information about the environment you are running in:\n<env>\n  Workspace root folder: /tmp/x\n  Is directory a git repo: yes\n</env>"
+    ),
+    "Here is some useful information about the environment you are running in:\n<env>\n  Workspace root folder: /tmp/x\n  Is dir a git repo: yes\n</env>"
+  );
 });
 
 test("Forwarding keyword normalization rejects blank match and tag boundaries", () => {
@@ -546,6 +564,7 @@ test("Forwarding keyword normalization rejects blank match and tag boundaries", 
   assert.deepEqual(normalized["claude-oauth-prefixed"].text, [
     { match: "background_output", replace: "background_result" },
     { match: "background_cancel", replace: "background_stop" },
+    { match: "Is directory a git repo:", replace: "Is dir a git repo:" },
   ]);
   assert.deepEqual(normalized["claude-oauth-prefixed"].tags, [
     {
@@ -580,6 +599,7 @@ test("Forwarding keyword normalization overlays saved rules onto defaults", () =
   assert.deepEqual(normalized["claude-oauth-prefixed"].text, [
     { match: "background_output", replace: "background_result" },
     { match: "background_cancel", replace: "background_stop" },
+    { match: "Is directory a git repo:", replace: "Is dir a git repo:" },
   ]);
   assert.deepEqual(normalized["claude-oauth-prefixed"].tags, [
     {

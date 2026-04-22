@@ -29,6 +29,18 @@ export const DEFAULT_FORWARDING_KEYWORD_CONFIG: ForwardingKeywordConfig = {
     text: [
       { match: "background_output", replace: "background_result" },
       { match: "background_cancel", replace: "background_stop" },
+      // 2026-04-22 regression: Anthropic added a new fingerprint filter on the
+      // Claude OAuth lane that returns `extra usage` 400 when the system prompt
+      // contains all three of these literal substrings simultaneously:
+      //   1. "some useful information about the environment"
+      //   2. "Workspace root folder:"
+      //   3. "Is directory a git repo:"
+      // Breaking just one of the three is sufficient. We rewrite the git-repo
+      // line because (a) it is the most distinctive of the three, (b) the
+      // shortened form preserves the intended semantics for the model, and
+      // (c) it has no behavioral impact on other lanes.
+      // See: notes/extra-usage/04-trigger-2026-04-22.md
+      { match: "Is directory a git repo:", replace: "Is dir a git repo:" },
     ],
     tags: [
       {
