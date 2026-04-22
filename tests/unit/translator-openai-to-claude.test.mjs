@@ -538,6 +538,104 @@ test("Forwarding keyword rules stay proxy-local and data-driven", () => {
   );
 });
 
+// 2026-04-22 thinking pollution mitigation:
+// Adaptive-only Claude models (Opus 4.7) regenerate fresh thinking every turn.
+// Re-injecting prior reasoning_content history as `type: "thinking"` blocks creates
+// an echo loop that pulls hallucinated thinking forward into new responses.
+// See notes/thinking-pollution/01-audit-2026-04-22.md +
+// experiments/thinking-pollution/2026-04-22-replay/ for the full validation.
+test("OpenAI -> Claude skips reasoning_content -> thinking injection on adaptive-only models", () => {
+  const result = openaiToClaudeRequest(
+    "claude-opus-4-7",
+    {
+      messages: [
+        { role: "user", content: "Hi" },
+        {
+          role: "assistant",
+          reasoning_content: "stale hallucinated thinking from prior turn",
+          content: "ok",
+        },
+        { role: "user", content: "next" },
+      ],
+    },
+    false
+  );
+
+  const assistant = result.messages.find((m) => m.role === "assistant");
+  assert.ok(assistant, "expected an assistant message");
+  assert.ok(
+    !assistant.content.some((b) => b.type === "thinking"),
+    "adaptive-only model must not receive injected thinking blocks from history reasoning_content"
+  );
+  assert.ok(
+    assistant.content.some((b) => b.type === "text" && b.text === "ok"),
+    "assistant text content must still be preserved"
+  );
+});
+
+test("OpenAI -> Claude still injects reasoning_content -> thinking on enabled-thinking models", () => {
+  const result = openaiToClaudeRequest(
+    "claude-opus-4-6",
+    {
+      messages: [
+        { role: "user", content: "Hi" },
+        {
+          role: "assistant",
+          reasoning_content: "prior thinking",
+          content: "ok",
+        },
+        { role: "user", content: "next" },
+      ],
+    },
+    false
+  );
+
+  const assistant = result.messages.find((m) => m.role === "assistant");
+  assert.ok(assistant, "expected an assistant message");
+  const thinkingBlock = assistant.content.find((b) => b.type === "thinking");
+  assert.ok(
+    thinkingBlock,
+    "non-adaptive Claude models keep the existing reasoning_content -> thinking conversion"
+  );
+  assert.equal(thinkingBlock.thinking, "prior thinking");
+  assert.equal(thinkingBlock.signature, DEFAULT_THINKING_CLAUDE_SIGNATURE);
+});
+
+test("OpenAI -> Claude drops inline thinking blocks too on adaptive-only models", () => {
+  const result = openaiToClaudeRequest(
+    "claude-opus-4-7",
+    {
+      messages: [
+        { role: "user", content: "Hi" },
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "thinking",
+              thinking: "preserved-on-non-adaptive-but-dropped-here",
+              signature: "anything",
+            },
+            { type: "text", text: "ok" },
+          ],
+        },
+        { role: "user", content: "next" },
+      ],
+    },
+    false
+  );
+
+  const assistant = result.messages.find((m) => m.role === "assistant");
+  assert.ok(assistant, "expected an assistant message");
+  assert.ok(
+    !assistant.content.some((b) => b.type === "thinking"),
+    "adaptive-only model must drop inline thinking blocks from history too (they trigger the same echo loop)"
+  );
+  assert.ok(
+    assistant.content.some((b) => b.type === "text" && b.text === "ok"),
+    "non-thinking blocks must still pass through"
+  );
+});
+
 test("Forwarding keyword normalization rejects blank match and tag boundaries", () => {
   const normalized = normalizeForwardingKeywordConfig({
     "claude-oauth-prefixed": {
