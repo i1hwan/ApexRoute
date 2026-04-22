@@ -213,7 +213,7 @@ export function openaiToClaudeRequest(model, body, stream) {
 
     for (const msg of nonSystemMessages) {
       const newRole = msg.role === "user" || msg.role === "tool" ? "user" : "assistant";
-      const blocks = getContentBlocksFromMessage(msg, toolNameMap, disableToolPrefix);
+      const blocks = getContentBlocksFromMessage(msg, toolNameMap, disableToolPrefix, model);
       const hasToolUse = blocks.some((b) => b.type === "tool_use");
       const hasToolResult = blocks.some((b) => b.type === "tool_result");
 
@@ -500,7 +500,19 @@ export function openaiToClaudeRequest(model, body, stream) {
 }
 
 // Get content blocks from single message
-function getContentBlocksFromMessage(msg, toolNameMap = new Map(), disableToolPrefix = false) {
+function getContentBlocksFromMessage(
+  msg,
+  toolNameMap = new Map(),
+  disableToolPrefix = false,
+  model = ""
+) {
+  // Adaptive-only Claude models (e.g. Opus 4.7) regenerate fresh thinking on every
+  // turn. Re-injecting prior reasoning_content history as `type: "thinking"` blocks
+  // creates an echo loop where the model treats stale (potentially hallucinated)
+  // thinking as a prefill and reproduces it in the next response.
+  // See notes/thinking-pollution/01-audit-2026-04-22.md for the full diagnosis +
+  // experiments/thinking-pollution/2026-04-22-replay/ for replay validation.
+  const skipReasoningContentInjection = isAdaptiveOnlyModel(model);
   const blocks = [];
 
   if (msg.role === "tool") {
@@ -561,8 +573,9 @@ function getContentBlocksFromMessage(msg, toolNameMap = new Map(), disableToolPr
       }
     }
   } else if (msg.role === "assistant") {
-    // Add reasoning_content as thinking block (OpenAI extended thinking format)
-    if (msg.reasoning_content) {
+    // Add reasoning_content as thinking block (OpenAI extended thinking format).
+    // Skipped on adaptive-only models — see comment at top of function.
+    if (msg.reasoning_content && !skipReasoningContentInjection) {
       blocks.push({
         type: "thinking",
         thinking: disableToolPrefix
@@ -580,7 +593,9 @@ function getContentBlocksFromMessage(msg, toolNameMap = new Map(), disableToolPr
             text: disableToolPrefix ? part.text : rewriteClaudeOAuthLexicalText(part.text),
           });
         } else if (part.type === "thinking" || part.type === "redacted_thinking") {
-          // Preserve thinking blocks with signature
+          // Preserve thinking blocks with signature.
+          // Skipped on adaptive-only models for the same reason as reasoning_content.
+          if (skipReasoningContentInjection) continue;
           blocks.push({
             ...part,
             ...(typeof part.thinking === "string" && !disableToolPrefix
