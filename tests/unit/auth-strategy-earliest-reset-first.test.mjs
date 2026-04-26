@@ -4,7 +4,6 @@ import assert from "node:assert/strict";
 const earliestResetFirst = await import("../../src/sse/services/strategies/earliestResetFirst.ts");
 const quotaCache = await import("../../src/domain/quotaCache.ts");
 const sessionManager = await import("../../open-sse/services/sessionManager.ts");
-const modelWindowMapping = await import("../../src/sse/services/strategies/modelWindowMapping.ts");
 const accountTerminalStatus = await import("../../src/sse/services/accountTerminalStatus.ts");
 
 const {
@@ -18,8 +17,7 @@ const {
   selectByEarliestResetFirst,
 } = earliestResetFirst;
 
-const { setQuotaCache } = quotaCache;
-const { mapModelToRequiredWeekly } = modelWindowMapping;
+const { setQuotaCache, markAccountExhaustedFrom429 } = quotaCache;
 const { isTerminalConnectionStatus, normalizeStatus } = accountTerminalStatus;
 const { clearSessions, touchSession, generateSessionId } = sessionManager;
 
@@ -34,6 +32,8 @@ function isoIn(seconds) {
   return new Date(Date.now() + seconds * 1000).toISOString();
 }
 
+// v6 fixture: only session + weekly windows are seeded. Per-model windows
+// (Omelette/Sonnet) are intentionally absent — v6 ignores them entirely.
 function seedClaudeAccount(connId, opts) {
   const quotas = {
     "session (5h)": {
@@ -45,18 +45,6 @@ function seedClaudeAccount(connId, opts) {
       resetAt: opts.weeklyResetSec === null ? null : isoIn(opts.weeklyResetSec),
     },
   };
-  if (typeof opts.sonnetRem === "number") {
-    quotas["weekly Sonnet (7d)"] = {
-      remainingPercentage: opts.sonnetRem,
-      resetAt: opts.weeklyResetSec === null ? null : isoIn(opts.weeklyResetSec),
-    };
-  }
-  if (typeof opts.omeletteRem === "number") {
-    quotas["weekly Omelette (7d)"] = {
-      remainingPercentage: opts.omeletteRem,
-      resetAt: opts.weeklyResetSec === null ? null : isoIn(opts.weeklyResetSec),
-    };
-  }
   setQuotaCache(connId, "claude", quotas);
 }
 
@@ -83,7 +71,7 @@ test.beforeEach(() => {
   resetCacheState();
 });
 
-// ─── 1. Stepwise boundary tests (Plan v4 §6 #1) ──────────────────────────────
+// ─── 1. Stepwise boundary tests ──────────────────────────────────────────────
 
 test("sessionTimePoints: <= 5*60 returns 100", () => {
   assert.equal(sessionTimePoints(0), 100);
@@ -145,105 +133,59 @@ test("weeklyTimePoints: boundary table", () => {
   assert.equal(weeklyTimePoints(-1), 100);
 });
 
-// ─── 2. Intermediate value asserts (Plan v4 §6 #2 + §4 simulations) ─────────
+// ─── 2. Multiplicative track scoring (v6 §2.4) ───────────────────────────────
 
-test("Sonnet on Claude pool: GNUMAX (1h8m,10%) S_session = 35.5", () => {
+test("v6 scoreSessionTrack: T=40 × Q=10 = 400", () => {
   seedClaudeAccount("gnumax", {
     sessionRem: 10,
     sessionResetSec: 4080,
     weeklyRem: 62,
     weeklyResetSec: 435600,
-    sonnetRem: 100,
   });
   const s = scoreSessionTrack("gnumax");
   assert.equal(s.kind, "known");
-  assert.equal(s.score, 0.85 * 40 + 0.15 * 10, "T=40, Q_capped=10");
-  assert.equal(Math.round(s.score * 10) / 10, 35.5);
+  assert.equal(s.score, 40 * 10);
+  assert.equal(s.remainingPct, 10);
 });
 
-test("Sonnet on Claude pool: GNUMAX S_weekly bottleneck=overall 62 → 21.5", () => {
+test("v6 scoreWeeklyTrack: T=20 × Q=62 = 1240, ignores per-model windows", () => {
+  // Even if Sonnet/Omelette windows would have been seeded, v6 ignores them.
+  setQuotaCache("gnumax", "claude", {
+    "weekly (7d)": {
+      remainingPercentage: 62,
+      resetAt: isoIn(435600),
+    },
+    "weekly Sonnet (7d)": {
+      remainingPercentage: 88,
+      resetAt: isoIn(435600),
+    },
+    "weekly Omelette (7d)": {
+      remainingPercentage: 0,
+      resetAt: isoIn(435600),
+    },
+  });
+  const w = scoreWeeklyTrack("gnumax");
+  assert.equal(w.kind, "known");
+  assert.equal(w.remainingPct, 62, "uses overall weekly only, not bottleneck");
+  assert.equal(w.score, 20 * 62);
+});
+
+test("v6 scoreWeeklyTrack: signature does not accept modelHint", () => {
+  // Defensive: even if a caller passes a string, scoreWeeklyTrack must not
+  // consult model-specific windows. We pass only connId per v6 contract.
   seedClaudeAccount("gnumax", {
-    sessionRem: 10,
+    sessionRem: 50,
     sessionResetSec: 4080,
     weeklyRem: 62,
     weeklyResetSec: 435600,
-    sonnetRem: 100,
   });
-  const w = scoreWeeklyTrack("gnumax", "claude-sonnet-4.5");
+  // scoreWeeklyTrack(connId) — no second arg
+  const w = scoreWeeklyTrack("gnumax");
   assert.equal(w.kind, "known");
-  assert.equal(w.remainingPct, 62, "bottleneck overall 62 < sonnet 100");
-  assert.equal(w.score, 0.85 * 20 + 0.15 * 30, "T=20, Q_capped=30");
-  assert.equal(Math.round(w.score * 10) / 10, 21.5);
+  assert.equal(w.score, 20 * 62);
 });
 
-test("Sonnet on Claude pool: APEXATGNU (4h38m,100%) S_session = 21.5", () => {
-  seedClaudeAccount("apex", {
-    sessionRem: 100,
-    sessionResetSec: 16680,
-    weeklyRem: 49,
-    weeklyResetSec: 320400,
-    sonnetRem: 92,
-  });
-  const s = scoreSessionTrack("apex");
-  assert.equal(s.kind, "known");
-  assert.equal(s.score, 0.85 * 20 + 0.15 * 30, "T=20, Q_capped=30 (cap at 30 from 100)");
-  assert.equal(Math.round(s.score * 10) / 10, 21.5);
-});
-
-test("Sonnet on Claude pool: APEXATGNU S_weekly bottleneck=overall 49 → 21.5", () => {
-  seedClaudeAccount("apex", {
-    sessionRem: 100,
-    sessionResetSec: 16680,
-    weeklyRem: 49,
-    weeklyResetSec: 320400,
-    sonnetRem: 92,
-  });
-  const w = scoreWeeklyTrack("apex", "claude-sonnet-4.5");
-  assert.equal(w.kind, "known");
-  assert.equal(w.remainingPct, 49, "bottleneck overall 49 < sonnet 92");
-  assert.equal(Math.round(w.score * 10) / 10, 21.5);
-});
-
-test("Sonnet on Claude pool: composite scores GNUMAX 28.5, APEXATGNU 21.5", () => {
-  seedClaudeAccount("gnumax", {
-    sessionRem: 10,
-    sessionResetSec: 4080,
-    weeklyRem: 62,
-    weeklyResetSec: 435600,
-    sonnetRem: 100,
-  });
-  seedClaudeAccount("apex", {
-    sessionRem: 100,
-    sessionResetSec: 16680,
-    weeklyRem: 49,
-    weeklyResetSec: 320400,
-    sonnetRem: 92,
-  });
-
-  const gnumax = scoreAccount(claudeConn("gnumax"), "claude-sonnet-4.5");
-  const apex = scoreAccount(claudeConn("apex"), "claude-sonnet-4.5");
-
-  assert.equal(gnumax.excluded, false);
-  assert.equal(apex.excluded, false);
-  assert.equal(Math.round(gnumax.score * 10) / 10, 28.5);
-  assert.equal(Math.round(apex.score * 10) / 10, 21.5);
-});
-
-// ─── 3. Hard exclusion (Plan v4 §6 #3) ───────────────────────────────────────
-
-test("Opus request excludes APEXATGNU when weekly Omelette 0%", () => {
-  seedClaudeAccount("apex", {
-    sessionRem: 100,
-    sessionResetSec: 16680,
-    weeklyRem: 49,
-    weeklyResetSec: 320400,
-    sonnetRem: 92,
-    omeletteRem: 0,
-  });
-  const result = scoreAccount(claudeConn("apex"), "claude-opus-4-7");
-  assert.equal(result.excluded, true);
-  assert.match(result.reason, /weekly Omelette/);
-});
+// ─── 3. Hard exclusion ───────────────────────────────────────────────────────
 
 test("Session < 5% excludes account regardless of weekly", () => {
   seedClaudeAccount("dryacct", {
@@ -251,11 +193,22 @@ test("Session < 5% excludes account regardless of weekly", () => {
     sessionResetSec: 4080,
     weeklyRem: 80,
     weeklyResetSec: 435600,
-    sonnetRem: 80,
   });
-  const result = scoreAccount(claudeConn("dryacct"), "claude-sonnet-4.5");
+  const result = scoreAccount(claudeConn("dryacct"));
   assert.equal(result.excluded, true);
   assert.match(result.reason, /session<5%/);
+});
+
+test("Weekly < 5% excludes account regardless of session", () => {
+  seedClaudeAccount("dryweekly", {
+    sessionRem: 80,
+    sessionResetSec: 4080,
+    weeklyRem: 3,
+    weeklyResetSec: 435600,
+  });
+  const result = scoreAccount(claudeConn("dryweekly"));
+  assert.equal(result.excluded, true);
+  assert.match(result.reason, /weekly<5%/);
 });
 
 test("All candidates excluded → returns retryAfter from earliest excluded reset", () => {
@@ -271,11 +224,7 @@ test("All candidates excluded → returns retryAfter from earliest excluded rese
     weeklyRem: 50,
     weeklyResetSec: 5000,
   });
-  const result = selectByEarliestResetFirst(
-    [claudeConn("a"), claudeConn("b")],
-    "claude-sonnet-4.5",
-    null
-  );
+  const result = selectByEarliestResetFirst([claudeConn("a"), claudeConn("b")], null);
   assert.equal(result.allExcluded, true);
   assert.equal(result.excludedBreakdown.length, 2);
   // Earliest reset should come from "a" (sessionResetSec=1000)
@@ -284,7 +233,7 @@ test("All candidates excluded → returns retryAfter from earliest excluded rese
   assert.ok(Math.abs(aReset - expected) < 5000, "retryAfter ~ a's session reset");
 });
 
-// ─── 4. Reweighting (Plan v4 §6 #4) ──────────────────────────────────────────
+// ─── 4. Reweighting / missing tracks ─────────────────────────────────────────
 
 test("github-style account with no session window scores from weekly only", () => {
   seedSingleWeeklyAccount("ghacct", "github", {
@@ -293,103 +242,283 @@ test("github-style account with no session window scores from weekly only", () =
   });
   const s = scoreSessionTrack("ghacct");
   assert.equal(s.kind, "missing", "no session window → missing");
-  const w = scoreWeeklyTrack("ghacct", null);
+  const w = scoreWeeklyTrack("ghacct");
   assert.equal(w.kind, "known");
-  assert.equal(Math.round(w.score * 10) / 10, 21.5);
+  assert.equal(w.score, 20 * 80);
 
-  const result = scoreAccount(claudeConn("ghacct"), null);
+  const result = scoreAccount(claudeConn("ghacct"));
   assert.equal(result.excluded, false);
   assert.equal(
-    Math.round(result.score * 10) / 10,
-    21.5,
-    "denominator=1, baseScore = 21.5 (no session track injected)"
+    result.score,
+    20 * 80,
+    "denominator=1, baseScore = 1600 (no session track injected)"
   );
 });
 
-test("Account with no usable quota data is excluded", () => {
-  // No setQuotaCache call → session window missing AND no required model
-  // window mapping → weekly also missing. Use uniquely-suffixed id to avoid
-  // leaks from other tests (quotaCache is module-private).
-  const uniqueId = `unknown-${Math.random().toString(36).slice(2)}`;
-  // Pass null modelHint so weekly track returns "missing" (not "degraded")
-  // when both windows are absent.
-  const result = scoreAccount(claudeConn(uniqueId), null);
-  assert.equal(result.excluded, true);
-  assert.equal(result.reason, "no_quota_data");
+// ─── 5. F1: no_quota_data fallback (self-hosted / openai-compatible) ─────────
+
+test("F1-1: openai-compatible (no cache) → score=0, eligible (NOT excluded)", () => {
+  // No setQuotaCache call → both tracks "missing" → trackScores empty.
+  // v6 distinguishes this from quota-exhausted: cache entry absent → score=0.
+  const uniqueId = `openai-compat-${Math.random().toString(36).slice(2)}`;
+  const result = scoreAccount(claudeConn(uniqueId));
+  assert.equal(result.excluded, false, "self-hosted must remain eligible");
+  assert.equal(result.score, 0);
+  assert.equal(result.earliestReset, null);
 });
 
-test("Account with required model window missing → degraded (not excluded)", () => {
-  // Defensive sibling test: when modelHint maps to a required window and that
-  // window is absent, the weekly track returns "degraded" instead of "missing".
-  // This account is therefore scoreable (not excluded), but heavily penalized.
-  const uniqueId = `degraded-only-${Math.random().toString(36).slice(2)}`;
-  const result = scoreAccount(claudeConn(uniqueId), "claude-sonnet-4.5");
-  assert.equal(result.excluded, false);
-  assert.equal(result.breakdown.s.kind, "missing");
-  assert.equal(result.breakdown.w.kind, "degraded");
-  // baseScore = 0 (only degraded contributes, scored as 0); finalScore = -25
-  assert.equal(result.breakdown.degraded_pen, 25);
-});
-
-// ─── 5. Burn-down behavior (Plan v4 §6 #5) ───────────────────────────────────
-
-test("GNUMAX session 4min,Q=10% beats APEXATGNU session 4h,Q=100% (burn-down)", () => {
-  seedClaudeAccount("gnumax", {
-    sessionRem: 10,
-    sessionResetSec: 240,
-    weeklyRem: 62,
+test("F1-2: paid (score>0) + openai-compatible (score=0) → paid wins", () => {
+  seedClaudeAccount("paid", {
+    sessionRem: 50,
+    sessionResetSec: 4080,
+    weeklyRem: 60,
     weeklyResetSec: 435600,
-    sonnetRem: 100,
   });
-  seedClaudeAccount("apex", {
-    sessionRem: 100,
-    sessionResetSec: 16680,
-    weeklyRem: 49,
-    weeklyResetSec: 320400,
-    sonnetRem: 92,
-  });
-
-  const gnumax = scoreAccount(claudeConn("gnumax"), "claude-sonnet-4.5");
-  const apex = scoreAccount(claudeConn("apex"), "claude-sonnet-4.5");
-
-  // GNUMAX S_session = 0.85*100 + 0.15*10 = 86.5
-  // GNUMAX S_weekly = 0.85*20 + 0.15*30 = 21.5
-  // GNUMAX baseScore = 54.0
-  assert.equal(Math.round(gnumax.score * 10) / 10, 54.0);
-  assert.equal(Math.round(apex.score * 10) / 10, 21.5);
-  assert.ok(gnumax.score > apex.score, "burn-down: GNUMAX wins");
+  const compatId = `compat-${Math.random().toString(36).slice(2)}`;
+  // No seed for compatId → score=0 fallback
+  const result = selectByEarliestResetFirst([claudeConn("paid"), claudeConn(compatId)], null);
+  assert.equal(result.selected.id, "paid");
 });
 
-test("Post-reset GNUMAX (T=20, Q=100) ties APEXATGNU; tie-break by earliest reset → APEX wins", () => {
-  // GNUMAX after session reset: session 5h ahead (T=20), Q=100, weekly unchanged 62%
-  seedClaudeAccount("gnumax", {
-    sessionRem: 100,
-    sessionResetSec: 18000,
-    weeklyRem: 62,
-    weeklyResetSec: 435600,
-    sonnetRem: 100,
-  });
-  seedClaudeAccount("apex", {
-    sessionRem: 100,
-    sessionResetSec: 16680,
-    weeklyRem: 49,
-    weeklyResetSec: 320400,
-    sonnetRem: 92,
-  });
-
+test("F1-3: two openai-compatible (both score=0) → lex id smaller wins", () => {
+  // No seeds → both fallback to score=0. Tie-break: equal earliestReset (null
+  // → +Infinity), then lex id ascending → "aaa" wins.
   const result = selectByEarliestResetFirst(
-    [claudeConn("gnumax"), claudeConn("apex")],
-    "claude-sonnet-4.5",
+    [claudeConn("zzz-compat"), claudeConn("aaa-compat")],
     null
   );
-  assert.equal(
-    result.selected.id,
-    "apex",
-    "tie-break: apex's 3d17h reset is earlier than gnumax 5d1h"
-  );
+  assert.equal(result.selected.id, "aaa-compat");
 });
 
-// ─── 6. Affinity (Plan v4 §6 #6) ─────────────────────────────────────────────
+test("F1-4: 429-marked empty cache → excluded (NOT revived as score=0)", () => {
+  // markAccountExhaustedFrom429 creates {quotas:{}, exhausted:true} entry.
+  // v6 must detect this via isAccountQuotaExhausted and exclude — NOT treat
+  // as "self-hosted no-cache" eligible at score=0.
+  const exhaustedId = `exhausted-${Math.random().toString(36).slice(2)}`;
+  markAccountExhaustedFrom429(exhaustedId, "claude");
+  const result = scoreAccount(claudeConn(exhaustedId));
+  assert.equal(result.excluded, true);
+  assert.equal(result.reason, "quota_exhausted_unknown_reset");
+});
+
+// ─── 6. F2: model-specific weekly windows ignored ────────────────────────────
+
+test("F2-1: routing decision is identical for opus/sonnet/haiku", () => {
+  // Seed both accounts with model-specific windows that would have caused
+  // v4 to split per-model. v6 must produce the SAME selection regardless of
+  // whether we pass null or any model name (because modelHint is gone).
+  setQuotaCache("apex", "claude", {
+    "session (5h)": { remainingPercentage: 50, resetAt: isoIn(4080) },
+    "weekly (7d)": { remainingPercentage: 50, resetAt: isoIn(320400) },
+    "weekly Sonnet (7d)": { remainingPercentage: 90, resetAt: isoIn(320400) },
+    "weekly Omelette (7d)": { remainingPercentage: 10, resetAt: isoIn(320400) },
+  });
+  setQuotaCache("gnumax", "claude", {
+    "session (5h)": { remainingPercentage: 70, resetAt: isoIn(4080) },
+    "weekly (7d)": { remainingPercentage: 60, resetAt: isoIn(435600) },
+    "weekly Sonnet (7d)": { remainingPercentage: 100, resetAt: isoIn(435600) },
+    "weekly Omelette (7d)": { remainingPercentage: 80, resetAt: isoIn(435600) },
+  });
+  // v6 selectByEarliestResetFirst takes (candidates, sessionId) — no modelHint.
+  const r1 = selectByEarliestResetFirst([claudeConn("apex"), claudeConn("gnumax")], null);
+  // Same call again to ensure determinism (no global state pollution).
+  const r2 = selectByEarliestResetFirst([claudeConn("apex"), claudeConn("gnumax")], null);
+  assert.equal(r1.selected.id, r2.selected.id);
+});
+
+test("F2-2: weekly Omelette=0% (would have hard-excluded in v4) does NOT exclude in v6", () => {
+  setQuotaCache("apex", "claude", {
+    "session (5h)": { remainingPercentage: 50, resetAt: isoIn(4080) },
+    "weekly (7d)": { remainingPercentage: 50, resetAt: isoIn(320400) },
+    "weekly Omelette (7d)": { remainingPercentage: 0, resetAt: isoIn(320400) },
+  });
+  const result = scoreAccount(claudeConn("apex"));
+  assert.equal(result.excluded, false, "v6 ignores per-model windows entirely");
+  // Score = avg(40·50, 20·50) = avg(2000, 1000) = 1500
+  assert.equal(result.score, 1500);
+});
+
+// ─── 7. F3: fresh quota (Q=100 AND resetAt=null) ─────────────────────────────
+
+test("F3-1: session resetAt=null AND Q=100 → score = 10000 (fresh)", () => {
+  setQuotaCache("fresh", "claude", {
+    "session (5h)": { remainingPercentage: 100, resetAt: null },
+    "weekly (7d)": { remainingPercentage: 80, resetAt: isoIn(435600) },
+  });
+  const s = scoreSessionTrack("fresh");
+  assert.equal(s.kind, "known");
+  assert.equal(s.score, 100 * 100, "T=100, Q=100 (fresh max-urgency)");
+  assert.equal(s.resetAt, null);
+});
+
+test("F3-2: session resetAt=null AND Q=80 → kind=missing (NOT fresh)", () => {
+  setQuotaCache("ambiguous", "claude", {
+    "session (5h)": { remainingPercentage: 80, resetAt: null },
+    "weekly (7d)": { remainingPercentage: 80, resetAt: isoIn(435600) },
+  });
+  const s = scoreSessionTrack("ambiguous");
+  assert.equal(s.kind, "missing", "non-100% null resetAt is ambiguous → missing");
+});
+
+test("F3-3: fresh session + normal weekly → composite via avg", () => {
+  setQuotaCache("fresh", "claude", {
+    "session (5h)": { remainingPercentage: 100, resetAt: null },
+    "weekly (7d)": { remainingPercentage: 80, resetAt: isoIn(435600) },
+  });
+  const result = scoreAccount(claudeConn("fresh"));
+  assert.equal(result.excluded, false);
+  // avg(10000, 20·80=1600) = 5800
+  assert.equal(result.score, (10000 + 1600) / 2);
+});
+
+test("F3-4: fresh account beats burning account", () => {
+  // A: fresh session (Q=100, resetAt=null) → s.score=10000, weekly Q=80, T=20 → w.score=1600 → avg 5800
+  setQuotaCache("fresh", "claude", {
+    "session (5h)": { remainingPercentage: 100, resetAt: null },
+    "weekly (7d)": { remainingPercentage: 80, resetAt: isoIn(435600) },
+  });
+  // B: burning session (Q=87, T=20 since 4h43m=17m ahead → 6h band? actually 17000s in 3h-6h band T=20) → s.score=1740, weekly Q=59 T=20 → w.score=1180 → avg 1460
+  setQuotaCache("burning", "claude", {
+    "session (5h)": { remainingPercentage: 87, resetAt: isoIn(17000) },
+    "weekly (7d)": { remainingPercentage: 59, resetAt: isoIn(414000) },
+  });
+  const result = selectByEarliestResetFirst([claudeConn("fresh"), claudeConn("burning")], null);
+  assert.equal(result.selected.id, "fresh");
+});
+
+test("F3-5: weekly resetAt=null AND Q=100 → score = 10000 (fresh weekly)", () => {
+  setQuotaCache("freshweekly", "claude", {
+    "session (5h)": { remainingPercentage: 80, resetAt: isoIn(4080) },
+    "weekly (7d)": { remainingPercentage: 100, resetAt: null },
+  });
+  const w = scoreWeeklyTrack("freshweekly");
+  assert.equal(w.kind, "known");
+  assert.equal(w.score, 100 * 100);
+  assert.equal(w.resetAt, null);
+});
+
+test("F3-6: weekly resetAt=null AND Q<100 → missing", () => {
+  setQuotaCache("ambiguousweekly", "claude", {
+    "session (5h)": { remainingPercentage: 80, resetAt: isoIn(4080) },
+    "weekly (7d)": { remainingPercentage: 70, resetAt: null },
+  });
+  const w = scoreWeeklyTrack("ambiguousweekly");
+  assert.equal(w.kind, "missing");
+});
+
+// ─── 8. F4: multiplicative scoring user scenario ─────────────────────────────
+
+test("F4-1: APEX(17%/2h, 35%/3d10h) vs GNUMAX(87%/4h, 59%/4d18h) → GNUMAX wins", () => {
+  // User's actual production scenario from .sisyphus/plans/routing-strategy-v6.md §2.4.
+  // 2h = 7200s in (3600, 10800] band → sessionTimePoints = 40
+  seedClaudeAccount("apex", {
+    sessionRem: 17,
+    sessionResetSec: 2 * 3600,
+    weeklyRem: 35,
+    weeklyResetSec: 3 * 86400 + 10 * 3600,
+  });
+  // 4h = 14400s in (10800, 21600] band → sessionTimePoints = 20
+  seedClaudeAccount("gnumax", {
+    sessionRem: 87,
+    sessionResetSec: 4 * 3600,
+    weeklyRem: 59,
+    weeklyResetSec: 4 * 86400 + 18 * 3600,
+  });
+
+  const apex = scoreAccount(claudeConn("apex"));
+  const gnumax = scoreAccount(claudeConn("gnumax"));
+
+  // APEX: session 40·17=680, weekly 20·35=700, avg = 690
+  // GNUMAX: session 20·87=1740, weekly 20·59=1180, avg = 1460
+  assert.equal(apex.score, (40 * 17 + 20 * 35) / 2);
+  assert.equal(gnumax.score, (20 * 87 + 20 * 59) / 2);
+  assert.ok(gnumax.score > apex.score, "GNUMAX must outrank APEX (burn-down semantic)");
+
+  const result = selectByEarliestResetFirst([claudeConn("apex"), claudeConn("gnumax")], null);
+  assert.equal(result.selected.id, "gnumax");
+});
+
+test("F4-2: backoffLevel=4 paid vs self-hosted score=0 → self-hosted wins", () => {
+  seedClaudeAccount("flaky", {
+    sessionRem: 50,
+    sessionResetSec: 4080,
+    weeklyRem: 60,
+    weeklyResetSec: 435600,
+  });
+  // flaky: avg(40·50, 20·60) = (2000+1200)/2 = 1600. backoffLevel=4 →
+  // pBackoff=min(4·25,100)=100 → finalScore = 1600 - 100·100 = 1600 - 10000 = -8400
+  // self-hosted: score=0. -8400 < 0 → self-hosted wins.
+  const compatId = `compat-${Math.random().toString(36).slice(2)}`;
+  const result = selectByEarliestResetFirst(
+    [claudeConn("flaky", { backoffLevel: 4 }), claudeConn(compatId)],
+    null
+  );
+  assert.equal(result.selected.id, compatId);
+});
+
+test("F4-3: T=10 × Q=100 = 1000 (low urgency, abundant quota)", () => {
+  // 7h = 25200s, in >6h band → sessionTimePoints = 10
+  seedClaudeAccount("idle", {
+    sessionRem: 100,
+    sessionResetSec: 7 * 3600,
+    weeklyRem: 100,
+    weeklyResetSec: 5 * 86400,
+  });
+  const result = scoreAccount(claudeConn("idle"));
+  // session: 10·100 = 1000, weekly: 20·100 = 2000, avg = 1500
+  assert.equal(result.score, (10 * 100 + 20 * 100) / 2);
+});
+
+test("F4-4: Q boundary at exactly 5 → known (NOT excluded), score = T × 5", () => {
+  // Q=5 is the inclusive lower bound for "usable"; v6 excludes only Q<5.
+  seedClaudeAccount("edge", {
+    sessionRem: 5,
+    sessionResetSec: 4080,
+    weeklyRem: 50,
+    weeklyResetSec: 435600,
+  });
+  const s = scoreSessionTrack("edge");
+  assert.equal(s.kind, "known");
+  assert.equal(s.score, 40 * 5);
+});
+
+test("F4-5: Q just under 5 (Q=4.999 rounded to 5 by safePercentage) — boundary check", () => {
+  // remainingPercentage is rounded by safePercentage in quotaCache.ts. We
+  // exercise the exact-5 boundary here; the <5 path is covered by other
+  // hard-exclusion tests.
+  seedClaudeAccount("edge2", {
+    sessionRem: 5,
+    sessionResetSec: 4080,
+    weeklyRem: 50,
+    weeklyResetSec: 435600,
+  });
+  const result = scoreAccount(claudeConn("edge2"));
+  assert.equal(result.excluded, false, "Q=5 must remain eligible");
+});
+
+test("F4-6: comparator equal product breaks via earliest reset asc", () => {
+  // Two accounts with identical avg scores but different reset times. The
+  // tie-break must pick the earlier-resetting one.
+  // A: session T=40·Q=50 = 2000, weekly T=20·Q=100 = 2000, avg = 2000, earliestReset = 1h
+  seedClaudeAccount("a", {
+    sessionRem: 50,
+    sessionResetSec: 3600,
+    weeklyRem: 100,
+    weeklyResetSec: 7 * 86400,
+  });
+  // B: session T=20·Q=100 = 2000, weekly T=40·Q=50 = 2000, avg = 2000, earliestReset = 4h
+  seedClaudeAccount("b", {
+    sessionRem: 100,
+    sessionResetSec: 4 * 3600,
+    weeklyRem: 50,
+    weeklyResetSec: 3 * 86400,
+  });
+  const result = selectByEarliestResetFirst([claudeConn("a"), claudeConn("b")], null);
+  // A's session reset (1h) is the earliest known reset across both accounts.
+  assert.equal(result.selected.id, "a");
+});
+
+// ─── 9. Affinity ─────────────────────────────────────────────────────────────
 
 test("Affinity hit: same account selected within 5min", () => {
   seedClaudeAccount("gnumax", {
@@ -397,24 +526,18 @@ test("Affinity hit: same account selected within 5min", () => {
     sessionResetSec: 4080,
     weeklyRem: 62,
     weeklyResetSec: 435600,
-    sonnetRem: 100,
   });
   seedClaudeAccount("apex", {
     sessionRem: 100,
     sessionResetSec: 16680,
     weeklyRem: 49,
     weeklyResetSec: 320400,
-    sonnetRem: 92,
   });
 
   const sessionId = "test-affinity-hit";
   touchSession(sessionId, "gnumax");
 
-  const result = selectByEarliestResetFirst(
-    [claudeConn("gnumax"), claudeConn("apex")],
-    "claude-sonnet-4.5",
-    sessionId
-  );
+  const result = selectByEarliestResetFirst([claudeConn("gnumax"), claudeConn("apex")], sessionId);
   assert.equal(result.selected.id, "gnumax", "affinity hit overrides cold-start scoring");
 });
 
@@ -425,75 +548,61 @@ test("Affinity break on session<5%: bound account no longer valid", () => {
     sessionResetSec: 4080,
     weeklyRem: 62,
     weeklyResetSec: 435600,
-    sonnetRem: 100,
   });
   seedClaudeAccount("apex", {
     sessionRem: 100,
     sessionResetSec: 16680,
     weeklyRem: 49,
     weeklyResetSec: 320400,
-    sonnetRem: 92,
   });
 
   const sessionId = "test-affinity-break-quota";
   touchSession(sessionId, "gnumax");
 
-  const result = selectByEarliestResetFirst(
-    [claudeConn("gnumax"), claudeConn("apex")],
-    "claude-sonnet-4.5",
-    sessionId
-  );
+  const result = selectByEarliestResetFirst([claudeConn("gnumax"), claudeConn("apex")], sessionId);
   assert.equal(result.selected.id, "apex", "GNUMAX excluded by quota → APEX selected");
 });
 
-test("Affinity break on rate-limited connection (caller filters out)", () => {
-  // Per plan v4 §3.1, callers (auth.ts:437-448) pre-filter rate-limited
-  // accounts from `candidates`. We replicate that here: bound id is GNUMAX
-  // but it is NOT in the candidate list, simulating "filtered out by caller
-  // because rate-limited". Affinity must break and APEX is selected.
-  seedClaudeAccount("gnumax", {
-    sessionRem: 50,
-    sessionResetSec: 4080,
-    weeklyRem: 62,
-    weeklyResetSec: 435600,
-    sonnetRem: 100,
-  });
-  seedClaudeAccount("apex", {
-    sessionRem: 100,
-    sessionResetSec: 16680,
-    weeklyRem: 49,
-    weeklyResetSec: 320400,
-    sonnetRem: 92,
-  });
+test("Affinity for self-hosted (no cache) connection remains valid", () => {
+  // Defensive regression test for F1: a self-hosted bound connection has
+  // both tracks "missing" but isAffinityValid must NOT reject (no excluded
+  // hard exclusion). The other affinity gates (session/rate-limit/terminal)
+  // still apply.
+  const compatId = `compat-${Math.random().toString(36).slice(2)}`;
+  const sessionId = "test-affinity-self-hosted";
+  touchSession(sessionId, compatId);
+  const out = isAffinityValid(claudeConn(compatId), sessionId);
+  assert.equal(out.valid, true, "self-hosted (no cache) bound conn keeps affinity");
+});
 
-  const sessionId = "test-affinity-break-rl-caller";
-  touchSession(sessionId, "gnumax");
-
-  // GNUMAX excluded by caller (e.g. rateLimitedUntil expired in the meantime).
-  const result = selectByEarliestResetFirst([claudeConn("apex")], "claude-sonnet-4.5", sessionId);
-  assert.equal(result.selected.id, "apex", "bound id missing from candidates → fall to scoring");
+test("Affinity break on 429-marked empty cache (Copilot PR #23 review)", () => {
+  // Bound connection was exhausted via markAccountExhaustedFrom429: both
+  // tracks return "missing" (empty quotas), but the cache says exhausted=true.
+  // isAffinityValid must reject so we don't pin to a 429-burning account.
+  const exhaustedId = `exhausted-affinity-${Math.random().toString(36).slice(2)}`;
+  markAccountExhaustedFrom429(exhaustedId, "claude");
+  const sessionId = "test-affinity-429-exhausted";
+  touchSession(sessionId, exhaustedId);
+  const out = isAffinityValid(claudeConn(exhaustedId), sessionId);
+  assert.equal(out.valid, false);
+  assert.equal(out.reason, "quota_exhausted_unknown_reset");
 });
 
 test("isAffinityValid detects rate-limited even when caller leaks one through", () => {
-  // Defensive double-check (plan v4 §3.3): even if caller passes rate-limited
-  // connection through (race window), isAffinityValid catches it.
+  // Defensive double-check: even if caller passes rate-limited connection
+  // through (race window), isAffinityValid catches it.
   seedClaudeAccount("gnumax", {
     sessionRem: 50,
     sessionResetSec: 4080,
     weeklyRem: 62,
     weeklyResetSec: 435600,
-    sonnetRem: 100,
   });
 
   const sessionId = "test-isvalid-rl";
   touchSession(sessionId, "gnumax");
 
   const futureRl = new Date(Date.now() + 60_000).toISOString();
-  const out = isAffinityValid(
-    claudeConn("gnumax", { rateLimitedUntil: futureRl }),
-    "claude-sonnet-4.5",
-    sessionId
-  );
+  const out = isAffinityValid(claudeConn("gnumax", { rateLimitedUntil: futureRl }), sessionId);
   assert.equal(out.valid, false);
   assert.equal(out.reason, "rate_limited");
 });
@@ -504,45 +613,27 @@ test("isAffinityValid: rateLimitedUntil ISO string parsed correctly", () => {
     sessionResetSec: 4080,
     weeklyRem: 62,
     weeklyResetSec: 435600,
-    sonnetRem: 100,
   });
   const sessionId = "test-rl-parse";
   touchSession(sessionId, "gnumax");
 
   const futureRl = new Date(Date.now() + 60_000).toISOString();
-  const out1 = isAffinityValid(
-    claudeConn("gnumax", { rateLimitedUntil: futureRl }),
-    "claude-sonnet-4.5",
-    sessionId
-  );
+  const out1 = isAffinityValid(claudeConn("gnumax", { rateLimitedUntil: futureRl }), sessionId);
   assert.equal(out1.valid, false);
   assert.equal(out1.reason, "rate_limited");
 
   const pastRl = new Date(Date.now() - 60_000).toISOString();
-  const out2 = isAffinityValid(
-    claudeConn("gnumax", { rateLimitedUntil: pastRl }),
-    "claude-sonnet-4.5",
-    sessionId
-  );
+  const out2 = isAffinityValid(claudeConn("gnumax", { rateLimitedUntil: pastRl }), sessionId);
   assert.equal(out2.valid, true, "past rate limit should not block");
 
-  const out3 = isAffinityValid(
-    claudeConn("gnumax", { rateLimitedUntil: null }),
-    "claude-sonnet-4.5",
-    sessionId
-  );
+  const out3 = isAffinityValid(claudeConn("gnumax", { rateLimitedUntil: null }), sessionId);
   assert.equal(out3.valid, true, "null rate limit should not block");
 
-  const out4 = isAffinityValid(
-    claudeConn("gnumax", { rateLimitedUntil: "" }),
-    "claude-sonnet-4.5",
-    sessionId
-  );
+  const out4 = isAffinityValid(claudeConn("gnumax", { rateLimitedUntil: "" }), sessionId);
   assert.equal(out4.valid, true, "empty string rate limit should not block");
 
   const out5 = isAffinityValid(
     claudeConn("gnumax", { rateLimitedUntil: "not-a-real-iso-string" }),
-    "claude-sonnet-4.5",
     sessionId
   );
   assert.equal(
@@ -561,32 +652,16 @@ test("isAffinityValid: missing isActive (undefined) should NOT mark as inactive"
     sessionResetSec: 4080,
     weeklyRem: 62,
     weeklyResetSec: 435600,
-    sonnetRem: 100,
   });
   const sessionId = "test-isvalid-isactive-undefined";
   touchSession(sessionId, "gnumax");
 
   const partialConn = { id: "gnumax" };
-  const out = isAffinityValid(partialConn, "claude-sonnet-4.5", sessionId);
+  const out = isAffinityValid(partialConn, sessionId);
   assert.equal(out.valid, true, "undefined isActive must not falsely deactivate");
 });
 
-test("scoreWeeklyTrack: overall<5% beats degraded fallback (Copilot C1)", () => {
-  // Copilot review C1: hard exclusion order matters. If an account's overall
-  // weekly is exhausted (<5%), it must be excluded even when the model-specific
-  // window is missing — otherwise we'd happily route to a dead account.
-  setQuotaCache("dryacct", "claude", {
-    "weekly (7d)": {
-      remainingPercentage: 3,
-      resetAt: isoIn(86400),
-    },
-  });
-  const w = scoreWeeklyTrack("dryacct", "claude-sonnet-4.5");
-  assert.equal(w.kind, "excluded");
-  assert.equal(w.reason, "weekly_overall<5%");
-});
-
-// ─── 7. Tie-breaking determinism (Plan v4 §6 #7) ─────────────────────────────
+// ─── 10. Tie-breaking determinism ────────────────────────────────────────────
 
 test("Tie-break: equal scores fall through to earliest reset asc", () => {
   const a = {
@@ -639,7 +714,7 @@ test("Tie-break: epsilon 1e-9 only exact ties trigger fallback", () => {
   assert.ok(candidateComparator(a, b) > 0, "b should win by score primary");
 });
 
-// ─── 8. Fingerprint stability (Plan v4 §6 #8) ────────────────────────────────
+// ─── 11. Fingerprint stability ───────────────────────────────────────────────
 
 test("Fingerprint is stable for same conversation (system + first user msg)", () => {
   const body = {
@@ -673,57 +748,7 @@ test("Fingerprint changes when system prompt changes", () => {
   assert.notEqual(id1, id2, "system prompt change must invalidate fingerprint");
 });
 
-// ─── 9. Pipeline ordering (Plan v4 §6 #9) ────────────────────────────────────
-
-test("modelWindowMapping: claude-opus matches weekly Omelette", () => {
-  assert.equal(mapModelToRequiredWeekly("claude-opus-4-7"), "weekly Omelette");
-  assert.equal(mapModelToRequiredWeekly("claude-opus-4-5"), "weekly Omelette");
-});
-
-test("modelWindowMapping: claude-sonnet matches weekly Sonnet", () => {
-  assert.equal(mapModelToRequiredWeekly("claude-sonnet-4.5"), "weekly Sonnet");
-  assert.equal(mapModelToRequiredWeekly("claude-sonnet-4-5"), "weekly Sonnet");
-});
-
-test("modelWindowMapping: non-claude returns null", () => {
-  assert.equal(mapModelToRequiredWeekly("gpt-5.4"), null);
-  assert.equal(mapModelToRequiredWeekly("gemini-3.1"), null);
-  assert.equal(mapModelToRequiredWeekly(null), null);
-  assert.equal(mapModelToRequiredWeekly(""), null);
-});
-
-// ─── 10. Degraded scenario (Plan v4 §2.4 + Oracle rev3 #3) ───────────────────
-
-test("Degraded weekly window does not inflate score (Oracle rev3 #3)", () => {
-  // GNUMAX session 4min imminent (S_session=86.5) but Sonnet window MISSING
-  seedClaudeAccount("gnumax", {
-    sessionRem: 10,
-    sessionResetSec: 240,
-    weeklyRem: 62,
-    weeklyResetSec: 435600,
-    // omit sonnetRem -> required window missing for Sonnet request
-  });
-  // APEX has full data
-  seedClaudeAccount("apex", {
-    sessionRem: 100,
-    sessionResetSec: 16680,
-    weeklyRem: 49,
-    weeklyResetSec: 320400,
-    sonnetRem: 92,
-  });
-
-  const gnumax = scoreAccount(claudeConn("gnumax"), "claude-sonnet-4.5");
-  const apex = scoreAccount(claudeConn("apex"), "claude-sonnet-4.5");
-
-  // Pre-fix v4 inflation would give GNUMAX 86.5 - 25 = 61.5 (incorrectly winning)
-  // Post-fix: baseScore = (86.5 + 0)/2 = 43.25; finalScore = 43.25 - 25 = 18.25
-  assert.equal(gnumax.excluded, false);
-  assert.equal(Math.round(gnumax.score * 100) / 100, 18.25);
-  assert.equal(Math.round(apex.score * 10) / 10, 21.5);
-  assert.ok(apex.score > gnumax.score, "fully-known APEX must beat degraded GNUMAX");
-});
-
-// ─── 11. Single-account pool + Codex/GitHub trivials ─────────────────────────
+// ─── 12. Single-account pool ─────────────────────────────────────────────────
 
 test("Single-account pool: codex-style account selected directly", () => {
   setQuotaCache("codex1", "codex", {
@@ -736,11 +761,11 @@ test("Single-account pool: codex-style account selected directly", () => {
       resetAt: isoIn(241200),
     },
   });
-  const result = selectByEarliestResetFirst([claudeConn("codex1")], "gpt-5.4", null);
+  const result = selectByEarliestResetFirst([claudeConn("codex1")], null);
   assert.equal(result.selected.id, "codex1");
 });
 
-// ─── 12. Terminal status excluded from affinity ──────────────────────────────
+// ─── 13. Terminal status ─────────────────────────────────────────────────────
 
 test("isTerminalConnectionStatus detects credits_exhausted/banned/expired", () => {
   assert.equal(isTerminalConnectionStatus({ testStatus: "credits_exhausted" }), true);
@@ -767,17 +792,12 @@ test("isAffinityValid detects terminal status defensively", () => {
     sessionResetSec: 4080,
     weeklyRem: 62,
     weeklyResetSec: 435600,
-    sonnetRem: 100,
   });
 
   const sessionId = "test-isvalid-terminal";
   touchSession(sessionId, "gnumax");
 
-  const out = isAffinityValid(
-    claudeConn("gnumax", { testStatus: "expired" }),
-    "claude-sonnet-4.5",
-    sessionId
-  );
+  const out = isAffinityValid(claudeConn("gnumax", { testStatus: "expired" }), sessionId);
   assert.equal(out.valid, false);
   assert.equal(out.reason, "terminal");
 });
