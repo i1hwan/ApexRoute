@@ -14,9 +14,15 @@ export function transformToOllama(response, model) {
   let pendingToolCalls: Record<number, PendingToolCall> = {};
   const completedToolCalls: PendingToolCall[] = [];
 
+  // Outer-scoped decoder with `stream: true` is required to stitch multi-byte
+  // UTF-8 characters that the upstream HTTP body splits across chunks.
+  // See responsesTransformer.ts for the same fix and combo.ts:607-708 for the
+  // canonical comment explaining why per-chunk decoders corrupt non-ASCII text.
+  const decoder = new TextDecoder();
+
   const transform = new TransformStream({
     transform(chunk, controller) {
-      const text = new TextDecoder().decode(chunk);
+      const text = decoder.decode(chunk, { stream: true });
       buffer += text;
       const lines = buffer.split("\n");
       buffer = lines.pop() || "";
@@ -96,6 +102,9 @@ export function transformToOllama(response, model) {
       }
     },
     flush(controller) {
+      const tail = decoder.decode();
+      if (tail) buffer += tail;
+
       const ollamaEnd =
         JSON.stringify({ model, message: { role: "assistant", content: "" }, done: true }) + "\n";
       controller.enqueue(new TextEncoder().encode(ollamaEnd));

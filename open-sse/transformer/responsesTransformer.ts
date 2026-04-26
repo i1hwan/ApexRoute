@@ -300,9 +300,20 @@ export function createResponsesApiTransformStream(logger = null) {
     }
   };
 
+  // Outer-scoped decoder with `stream: true` is required to stitch multi-byte
+  // UTF-8 characters (e.g. Korean is 3 bytes per char) that the upstream HTTP
+  // body splits across chunks. Pre-fix this transformer created a fresh
+  // TextDecoder per chunk, so mid-character byte boundaries decoded as
+  // U+FFFD or got reinterpreted into wrong characters and corrupted both
+  // `output_text.delta` and `function_call_arguments.delta` for non-ASCII text.
+  // See combo.ts:607-708 for the same pattern applied to the omniModel sanitize
+  // stream and the lengthy comment there explaining why per-stream decoders
+  // must not be shared.
+  const decoder = new TextDecoder();
+
   return new TransformStream({
     transform(chunk, controller) {
-      const text = new TextDecoder().decode(chunk);
+      const text = decoder.decode(chunk, { stream: true });
       logger?.logInput(text.trim());
       state.buffer += text;
 
@@ -501,6 +512,12 @@ export function createResponsesApiTransformStream(logger = null) {
     },
 
     flush(controller) {
+      const tail = decoder.decode();
+      if (tail) {
+        state.buffer += tail;
+        logger?.logInput(tail.trim());
+      }
+
       for (const i in state.msgItemAdded) closeMessage(controller, i);
       closeReasoning(controller);
       for (const i in state.funcCallIds) closeToolCall(controller, i);
