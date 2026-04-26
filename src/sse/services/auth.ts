@@ -700,14 +700,13 @@ export async function getProviderCredentials(
       const selectedId = getNextFromDeckSync(`conn:${provider}`, ids);
       connection = orderedConnections.find((c) => c.id === selectedId) || orderedConnections[0];
     } else if (strategy === "earliest-reset-first") {
-      // Cache-aware burn-down: route to the account whose quota resets soonest,
-      // with affinity to the same account within a 5-min sliding window. See
-      // .sisyphus/plans/routing-strategy-v4.md and earliestResetFirst.ts.
-      const result = selectByEarliestResetFirst(
-        orderedConnections,
-        requestedModel,
-        options.sessionId || null
-      );
+      // Cache-aware burn-down: route to the account whose quota is most
+      // urgent to drain before reset (largest T_pts × Q_remain product), with
+      // affinity to the same account within a 5-min sliding window. v6
+      // dropped the modelHint parameter — model-specific weekly windows are
+      // no longer consulted for ranking or hard exclusion. See
+      // .sisyphus/plans/routing-strategy-v6.md and earliestResetFirst.ts.
+      const result = selectByEarliestResetFirst(orderedConnections, options.sessionId || null);
       if ("allExcluded" in result) {
         log.warn(
           "AUTH",

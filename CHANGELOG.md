@@ -4,6 +4,25 @@
 
 ---
 
+## [3.7.1] — 2026-04-27
+
+### 🐛 Bug Fixes
+
+- **Earliest-Reset-First Routing — Production Hotfix Bundle (4 fixes):** v3.7.0 shipped the `earliest-reset-first` strategy with an additive `S = 0.85·T + 0.15·min(Q, 30)` score. Production observation revealed four regressions, fixed in this patch:
+  - **F1 (self-hosted fallback):** Accounts with no quota cache (e.g. user-added `openai-compatible` providers like local llama.cpp) returned `excluded: "no_quota_data"` and produced an `all candidates excluded` 503. They now fall back to `score = 0` and remain eligible — paid candidates with positive scores still beat them, but they are usable when no paid candidate exists. `markAccountExhaustedFrom429()` empty caches are still excluded.
+  - **F2 (per-model windows ignored):** Removed `modelWindowMapping.ts` and the model-specific weekly-window lookup. Routing now reads only the overall `weekly` window — per-model `weekly Sonnet` / `weekly Omelette` buckets no longer split routing across requests for the same conversation. If Anthropic 429s an opus request because per-model quota is exhausted, `accountFallback` retries on another account.
+  - **F3 (fresh quota max-urgency):** Anthropic omits `resetAt` for accounts where the timer hasn't started yet (always at 100% remaining). v3.7.0 treated that as `missing` and excluded fresh accounts. v3.7.1 detects the strict pair `Q === 100 AND resetAt === null` and scores the track at `100 × 100 = 10000` (max urgency), so the very first request wakes the timer instead of further burning an already-active account.
+  - **F4 (multiplicative burn-down):** Replaced the additive score with `S = T_pts × Q_remain` (`score ∈ [0, 10000]`). The new formula makes "quota likely lost if not used" the actual scoring objective: `APEX(17%/2h) avg=690` now correctly loses to `GNUMAX(87%/4h) avg=1460` even though APEX's session is closer to reset. Penalties rescaled 100× (`PENALTY_DEGRADED 25→2500`, `PENALTY_BACKOFF_WEIGHT 1→100`, `PENALTY_ERROR_WEIGHT 0.4→40`) to preserve their relative impact across the new score range. `Q_SATURATION_CAP` removed (multiplicative scoring naturally weights remaining quota).
+- **Plan & Review:** `.sisyphus/plans/routing-strategy-v6.md` documents derivation, hand-math, and Oracle/Momus review history (4 logic blockers + 9 process items resolved). `routing-strategy-v5.md` is marked superseded.
+
+### 🔧 Internal
+
+- `selectByEarliestResetFirst(candidates, sessionId)` — `modelHint` parameter dropped (also from `scoreAccount`, `scoreWeeklyTrack`, `isAffinityValid`).
+- `scoreWeeklyTrack(connId)` simplified — single `getQuotaWindowStatus(connId, "weekly")` call, no bottleneck logic.
+- New unit regression coverage: 18 new tests (F1×4, F2×2, F3×6, F4×6) plus updated existing assertions.
+
+---
+
 ## [3.7.0] — 2026-04-26
 
 ### ✨ New Features

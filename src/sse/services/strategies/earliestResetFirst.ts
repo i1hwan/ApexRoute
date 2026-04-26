@@ -1,18 +1,24 @@
-// Earliest-reset-first burn-down routing strategy.
+// Earliest-reset-first burn-down routing strategy (v6).
 //
-// Selects the provider account whose quota will reset SOONEST, with a
-// saturating quota-room cap so accounts about to reset (and about to "lose"
-// any unused quota anyway) are preferred. See .sisyphus/plans/routing-strategy-v4.md
-// for derivation, simulations, and Oracle review history.
+// Selects the provider account whose quota is most urgent to drain before
+// reset — i.e. has the largest "T_pts × Q_remain" product. v6 supersedes v4
+// after production observation revealed four regressions:
+//   F1: self-hosted/openai-compatible (no quota cache) returned excluded
+//   F2: per-model weekly windows (Omelette/Sonnet) split routing per request
+//   F3: 100% fresh accounts (resetAt=null until first request) were excluded
+//   F4: additive S = 0.85·T + 0.15·min(Q,30) kept exhausted-but-urgent
+//       accounts winning over abundant-but-cool accounts
+//
+// See `.sisyphus/plans/routing-strategy-v6.md` for derivation, hand-math, and
+// Oracle / Momus review history.
 
-import { getQuotaWindowStatus } from "@/domain/quotaCache";
+import { getQuotaWindowStatus, isAccountQuotaExhausted } from "@/domain/quotaCache";
 import {
   getSessionConnection,
   getSessionInfo,
   touchSession,
 } from "@omniroute/open-sse/services/sessionManager.ts";
 import { isTerminalConnectionStatus } from "@/sse/services/accountTerminalStatus";
-import { mapModelToRequiredWeekly } from "@/sse/services/strategies/modelWindowMapping";
 
 interface ConnectionLike {
   id: string;
@@ -93,21 +99,22 @@ export interface SelectionTrace {
 
 const SESSION_AFFINITY_WINDOW_MS = 5 * 60 * 1000;
 const SCORE_TIE_EPSILON = 1e-9;
-const TRACK_WEIGHT_T = 0.85;
-const TRACK_WEIGHT_Q = 0.15;
-const Q_SATURATION_CAP = 30;
 const MIN_USABLE_REMAINING_PCT = 5;
-const PENALTY_ERROR_WEIGHT = 0.4;
-const PENALTY_BACKOFF_WEIGHT = 1.0;
+
+// v6 multiplicative score range is [0, 10000] (T_pts ∈ [10,100] × Q ∈ [5,100]).
+// Penalties scale 100× from v4 to keep their relative impact: the strongest
+// backoff (level 4) still subtracts ~baseScore from a typical mid-range
+// account, and a single degraded track still costs ~25% of a typical score.
+const PENALTY_ERROR_WEIGHT = 40;
+const PENALTY_BACKOFF_WEIGHT = 100;
 const PENALTY_BACKOFF_CAP = 100;
 const PENALTY_BACKOFF_PER_LEVEL = 25;
-const PENALTY_DEGRADED = 25;
+const PENALTY_DEGRADED = 2500;
 const ERROR_RATE_WINDOW_MS = 15 * 60 * 1000;
 
-// Stepwise piecewise functions. Boundaries are inclusive of the upper bound.
-// `null` input (missing resetAt) returns null so callers can branch.
-// Past resets (s <= 0) report maximal urgency so stale entries route quickly
-// to allow refresh on the next cache tick.
+// Stepwise time-urgency tables. `null` input (missing resetAt) is handled by
+// callers via the F3 fresh-quota branch. Past resets (s <= 0) report maximal
+// urgency so stale entries route quickly to refresh on the next cache tick.
 export function sessionTimePoints(secondsRemaining: number | null): number | null {
   if (secondsRemaining === null) return null;
   if (secondsRemaining <= 0) return 100;
@@ -153,15 +160,30 @@ export function scoreSessionTrack(connId: string): TrackResult {
   }
 
   const sec = deltaSec(status.resetAt);
+
+  // F3 fresh quota: Anthropic omits resetAt only when the session is at 100%
+  // and the timer hasn't started. Treat as max urgency so the very first
+  // request to that account starts the 5h timer rather than letting an
+  // already-burning account exhaust further. Q≠100 with null resetAt is
+  // ambiguous (API hiccup, stale cache, unsupported window) — keep missing.
+  if (sec === null && Q === 100) {
+    return {
+      kind: "known",
+      score: 100 * 100,
+      remainingPct: Q,
+      resetAt: null,
+      secondsToReset: Number.POSITIVE_INFINITY,
+      windowName: "session",
+    };
+  }
   if (sec === null) return { kind: "missing" };
 
   const T = sessionTimePoints(sec);
   if (T === null) return { kind: "missing" };
 
-  const Qcap = Math.min(Q, Q_SATURATION_CAP);
   return {
     kind: "known",
-    score: TRACK_WEIGHT_T * T + TRACK_WEIGHT_Q * Qcap,
+    score: T * Q,
     remainingPct: Q,
     resetAt: status.resetAt,
     secondsToReset: sec,
@@ -169,56 +191,44 @@ export function scoreSessionTrack(connId: string): TrackResult {
   };
 }
 
-export function scoreWeeklyTrack(connId: string, modelHint: string | null): TrackResult {
+// F2: model-specific weekly windows (Omelette/Sonnet) are deliberately ignored
+// in v6 per user instruction. Routing reads only the overall `weekly` window —
+// model-aware quota separation is not modelled. If Anthropic 429s an opus
+// request because per-model quota is exhausted, accountFallback handles retry.
+export function scoreWeeklyTrack(connId: string): TrackResult {
   const overall = getQuotaWindowStatus(connId, "weekly", 90);
-  const requiredWindow = mapModelToRequiredWeekly(modelHint);
-  const modelSpecific = requiredWindow ? getQuotaWindowStatus(connId, requiredWindow, 90) : null;
+  if (!overall) return { kind: "missing" };
 
-  // Hard exclusions MUST take precedence over degraded fallback (Copilot review C1):
-  // an account with overall weekly < 5% is genuinely out of quota and must be
-  // excluded even if its model-specific window is missing.
-  if (overall && overall.remainingPercentage < MIN_USABLE_REMAINING_PCT) {
-    return { kind: "excluded", reason: "weekly_overall<5%", resetAt: overall.resetAt };
+  if (overall.remainingPercentage < MIN_USABLE_REMAINING_PCT) {
+    return { kind: "excluded", reason: "weekly<5%", resetAt: overall.resetAt };
   }
 
-  if (modelSpecific && modelSpecific.remainingPercentage < MIN_USABLE_REMAINING_PCT) {
+  const sec = deltaSec(overall.resetAt);
+  const Q = overall.remainingPercentage;
+
+  // F3 fresh quota for weekly track (same semantics as session).
+  if (sec === null && Q === 100) {
     return {
-      kind: "excluded",
-      reason: `${requiredWindow || "weekly_model"}<5%`,
-      resetAt: modelSpecific.resetAt,
+      kind: "known",
+      score: 100 * 100,
+      remainingPct: Q,
+      resetAt: null,
+      secondsToReset: Number.POSITIVE_INFINITY,
+      windowName: "weekly",
     };
   }
-
-  if (requiredWindow && !modelSpecific) {
-    return { kind: "degraded", reason: `${requiredWindow}_missing` };
-  }
-
-  if (!overall && !modelSpecific) return { kind: "missing" };
-
-  const candidates = [overall, modelSpecific].filter(
-    (c): c is NonNullable<typeof c> => c !== null && c !== undefined
-  );
-
-  let bottleneck = candidates[0];
-  for (const c of candidates) {
-    if (c.remainingPercentage < bottleneck.remainingPercentage) bottleneck = c;
-  }
-
-  const sec = deltaSec(bottleneck.resetAt);
   if (sec === null) return { kind: "missing" };
 
   const T = weeklyTimePoints(sec);
   if (T === null) return { kind: "missing" };
 
-  const Q = bottleneck.remainingPercentage;
-  const Qcap = Math.min(Q, Q_SATURATION_CAP);
   return {
     kind: "known",
-    score: TRACK_WEIGHT_T * T + TRACK_WEIGHT_Q * Qcap,
+    score: T * Q,
     remainingPct: Q,
-    resetAt: bottleneck.resetAt,
+    resetAt: overall.resetAt,
     secondsToReset: sec,
-    windowName: bottleneck === overall ? "weekly" : requiredWindow || "weekly_model",
+    windowName: "weekly",
   };
 }
 
@@ -252,9 +262,9 @@ function earliestKnownReset(tracks: TrackResult[]): string | null {
   return new Date(Math.min(...dates)).toISOString();
 }
 
-export function scoreAccount(conn: ConnectionLike, modelHint: string | null): ScoredCandidate {
+export function scoreAccount(conn: ConnectionLike): ScoredCandidate {
   const s = scoreSessionTrack(conn.id);
-  const w = scoreWeeklyTrack(conn.id, modelHint);
+  const w = scoreWeeklyTrack(conn.id);
 
   if (s.kind === "excluded" || w.kind === "excluded") {
     const ex = s.kind === "excluded" ? s : (w as TrackExcluded);
@@ -281,7 +291,41 @@ export function scoreAccount(conn: ConnectionLike, modelHint: string | null): Sc
   }
 
   if (trackScores.length === 0) {
-    return { conn, excluded: true, reason: "no_quota_data" };
+    // F1: distinguish "no cache entry exists" (self-hosted / openai-compatible
+    // never reports usage → score=0 fallback so paid candidates still beat
+    // them but they remain eligible) from "cache says 429-exhausted with no
+    // resetAt" (markAccountExhaustedFrom429 → must stay excluded until
+    // refresh / TTL).
+    if (isAccountQuotaExhausted(conn.id)) {
+      return {
+        conn,
+        excluded: true,
+        reason: "quota_exhausted_unknown_reset",
+        resetAt: null,
+        breakdown: {
+          s,
+          w,
+          P_error: 0,
+          P_backoff: 0,
+          degraded_pen: 0,
+          baseScore: 0,
+        },
+      };
+    }
+    return {
+      conn,
+      excluded: false,
+      score: 0,
+      earliestReset: null,
+      breakdown: {
+        s,
+        w,
+        P_error: 0,
+        P_backoff: 0,
+        degraded_pen: 0,
+        baseScore: 0,
+      },
+    };
   }
 
   const baseScore = trackScores.reduce((a, b) => a + b, 0) / trackScores.length;
@@ -329,11 +373,7 @@ export function candidateComparator(a: ScoredCandidate, b: ScoredCandidate): num
   return a.conn.id.localeCompare(b.conn.id);
 }
 
-export function isAffinityValid(
-  conn: ConnectionLike,
-  modelHint: string | null,
-  sessionId: string | null
-): AffinityValidity {
+export function isAffinityValid(conn: ConnectionLike, sessionId: string | null): AffinityValidity {
   if (conn.isActive === false) return { valid: false, reason: "inactive" };
 
   if (conn.rateLimitedUntil) {
@@ -353,7 +393,7 @@ export function isAffinityValid(
 
   const s = scoreSessionTrack(conn.id);
   if (s.kind === "excluded") return { valid: false, reason: s.reason };
-  const w = scoreWeeklyTrack(conn.id, modelHint);
+  const w = scoreWeeklyTrack(conn.id);
   if (w.kind === "excluded") return { valid: false, reason: w.reason };
 
   return { valid: true };
@@ -385,21 +425,20 @@ function buildAllExcluded(scored: ScoredCandidate[]): AllExcludedResult {
 
 export function selectByEarliestResetFirst(
   candidates: ConnectionLike[],
-  modelHint: string | null,
   sessionId: string | null
 ): { selected: ConnectionLike } | AllExcludedResult {
   if (sessionId) {
     const boundId = getSessionConnection(sessionId);
     if (boundId) {
       const bound = candidates.find((c) => c.id === boundId);
-      const affinity = bound ? isAffinityValid(bound, modelHint, sessionId) : null;
+      const affinity = bound ? isAffinityValid(bound, sessionId) : null;
       if (bound && affinity?.valid === true) {
         return { selected: bound };
       }
     }
   }
 
-  const scored: ScoredCandidate[] = candidates.map((c) => scoreAccount(c, modelHint));
+  const scored: ScoredCandidate[] = candidates.map((c) => scoreAccount(c));
   const usable = scored.filter((s) => !s.excluded);
 
   if (usable.length === 0) return buildAllExcluded(scored);
