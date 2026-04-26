@@ -2,6 +2,7 @@ import { HTTP_STATUS, FETCH_TIMEOUT_MS } from "../config/constants.ts";
 import { applyFingerprint, isCliCompatEnabled } from "../config/cliFingerprints.ts";
 import { getRotatingApiKey } from "../services/apiKeyRotator.ts";
 import { getOpenAICompatibleType } from "../services/provider.ts";
+import { sanitizeSurrogatesDeep } from "../utils/sanitizeSurrogates.ts";
 
 /**
  * Sanitizes a custom API path to prevent path traversal attacks.
@@ -303,12 +304,17 @@ export class BaseExecutor {
         const timeoutSignal = AbortSignal.timeout(FETCH_TIMEOUT_MS);
         const combinedSignal = signal ? mergeAbortSignals(signal, timeoutSignal) : timeoutSignal;
 
-        // Apply CLI fingerprint ordering if enabled for this provider
+        // Strip lone UTF-16 surrogates before serializing. Strict upstream JSON
+        // parsers (Anthropic) reject unpaired 0xD800-0xDFFF code units that
+        // JavaScript otherwise allows. Single chokepoint: every executor path
+        // (default + fingerprint reorder) reads from `safeBody`.
+        const safeBody = sanitizeSurrogatesDeep(transformedBody);
+
         let finalHeaders = headers;
-        let bodyString = JSON.stringify(transformedBody);
+        let bodyString = JSON.stringify(safeBody);
 
         if (isCliCompatEnabled(this.provider)) {
-          const fingerprinted = applyFingerprint(this.provider, headers, transformedBody);
+          const fingerprinted = applyFingerprint(this.provider, headers, safeBody);
           finalHeaders = fingerprinted.headers;
           bodyString = fingerprinted.bodyString;
         }
