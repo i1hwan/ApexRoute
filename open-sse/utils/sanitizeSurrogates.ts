@@ -21,7 +21,7 @@ type MaybeWellFormedString = string & { toWellFormed?: () => string };
 
 /** Replace lone UTF-16 surrogates in `value` with U+FFFD; pass-through if none. */
 export function sanitizeSurrogates(value: string): string {
-  if (typeof value !== "string" || value.length === 0) return value;
+  if (value.length === 0) return value;
   if (!SURROGATE_PRESENT_RE.test(value)) return value;
 
   const candidate = value as MaybeWellFormedString;
@@ -34,9 +34,15 @@ export function sanitizeSurrogates(value: string): string {
 
 /**
  * Deep-walk plain objects and arrays, sanitizing every string. Clean
- * subtrees are returned by reference; mutated branches are cloned. Non-plain
- * objects (Date, Map, class instances) are not descended into; cycles are
- * not protected against (request bodies are acyclic JSON).
+ * subtrees are returned by reference; only the first branch that actually
+ * mutates triggers a clone, so clean payloads incur zero extra allocation.
+ *
+ * Non-plain objects (Date, Map, class instances) are not descended into;
+ * cycles are not protected against (request bodies are acyclic JSON).
+ *
+ * Cloning uses `Object.create(null)` so untrusted `__proto__` / `constructor`
+ * keys become plain data properties instead of mutating the result's
+ * prototype chain (prototype-pollution defense).
  */
 export function sanitizeSurrogatesDeep<T>(input: T): T {
   return sanitizeNode(input) as T;
@@ -48,31 +54,63 @@ function sanitizeNode(node: unknown): unknown {
   }
 
   if (Array.isArray(node)) {
-    let mutated = false;
-    const next = new Array(node.length);
-    for (let i = 0; i < node.length; i++) {
-      const original = node[i];
-      const sanitized = sanitizeNode(original);
-      next[i] = sanitized;
-      if (sanitized !== original) mutated = true;
-    }
-    return mutated ? next : node;
+    return sanitizeArray(node);
   }
 
   if (node !== null && typeof node === "object" && isPlainObject(node)) {
-    const source = node as Record<string, unknown>;
-    let mutated = false;
-    const next: Record<string, unknown> = {};
-    for (const key of Object.keys(source)) {
-      const original = source[key];
-      const sanitized = sanitizeNode(original);
-      next[key] = sanitized;
-      if (sanitized !== original) mutated = true;
-    }
-    return mutated ? next : node;
+    return sanitizeObject(node as Record<string, unknown>);
   }
 
   return node;
+}
+
+function sanitizeArray(node: readonly unknown[]): unknown[] | readonly unknown[] {
+  let next: unknown[] | undefined;
+  for (let i = 0; i < node.length; i++) {
+    const original = node[i];
+    const sanitized = sanitizeNode(original);
+
+    if (next !== undefined) {
+      next[i] = sanitized;
+      continue;
+    }
+
+    if (sanitized !== original) {
+      next = new Array(node.length);
+      for (let j = 0; j < i; j++) {
+        next[j] = node[j];
+      }
+      next[i] = sanitized;
+    }
+  }
+  return next ?? node;
+}
+
+function sanitizeObject(source: Record<string, unknown>): Record<string, unknown> {
+  let next: Record<string, unknown> | undefined;
+  const keys = Object.keys(source);
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i];
+    const original = source[key];
+    const sanitized = sanitizeNode(original);
+
+    if (next !== undefined) {
+      next[key] = sanitized;
+      continue;
+    }
+
+    if (sanitized !== original) {
+      // Null prototype prevents `__proto__` / `constructor` keys from
+      // hijacking the clone's prototype chain.
+      next = Object.create(null) as Record<string, unknown>;
+      for (let j = 0; j < i; j++) {
+        const earlier = keys[j];
+        next[earlier] = source[earlier];
+      }
+      next[key] = sanitized;
+    }
+  }
+  return next ?? source;
 }
 
 function isPlainObject(value: object): boolean {

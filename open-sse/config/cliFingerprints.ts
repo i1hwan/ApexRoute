@@ -217,12 +217,14 @@ export const CLI_FINGERPRINTS: Record<string, CliFingerprint> = {
 export function orderFields<T extends Record<string, unknown>>(obj: T, fieldOrder: string[]): T {
   if (!fieldOrder?.length || !obj || typeof obj !== "object") return obj;
 
-  const result: Record<string, unknown> = {};
+  // Null prototype: prevents an attacker-controlled `__proto__` / `constructor`
+  // key in `obj` from hijacking the result's prototype chain when copied.
+  const result: Record<string, unknown> = Object.create(null);
   const remaining = new Set(Object.keys(obj));
 
   // First, add fields in the specified order
   for (const key of fieldOrder) {
-    if (key in obj) {
+    if (Object.prototype.hasOwnProperty.call(obj, key)) {
       result[key] = obj[key];
       remaining.delete(key);
     }

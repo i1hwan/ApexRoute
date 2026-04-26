@@ -44,12 +44,6 @@ test("sanitizeSurrogates — primitives", async (t) => {
     assert.equal(sanitizeSurrogates(`${HIGH}${EMOJI}`), `${REPLACEMENT}${EMOJI}`);
   });
 
-  await t.test("non-string input returned as-is", () => {
-    assert.equal(sanitizeSurrogates(42), 42);
-    assert.equal(sanitizeSurrogates(null), null);
-    assert.equal(sanitizeSurrogates(undefined), undefined);
-  });
-
   await t.test("output never contains lone surrogates", () => {
     const inputs = [HIGH, LOW, `pre${HIGH}post`, `${LOW}tail`, `${HIGH}${EMOJI}${LOW}`];
     for (const input of inputs) {
@@ -137,6 +131,47 @@ test("sanitizeSurrogatesDeep — recursive walk", async (t) => {
     const output = sanitizeSurrogatesDeep(input);
     assert.equal(output.timestamp, date);
     assert.equal(output.label, `bad ${REPLACEMENT}`);
+  });
+
+  await t.test("clean array does not allocate a new array (lazy clone)", () => {
+    const inner = [{ role: "user", content: "ok" }];
+    const input = { messages: inner };
+    const output = sanitizeSurrogatesDeep(input);
+    assert.equal(output, input);
+    assert.equal(output.messages, inner);
+  });
+
+  await t.test("clean object does not allocate a new object (lazy clone)", () => {
+    const meta = { name: "echo", description: "echoes input" };
+    const input = { tool: meta };
+    const output = sanitizeSurrogatesDeep(input);
+    assert.equal(output, input);
+    assert.equal(output.tool, meta);
+  });
+
+  await t.test("__proto__ key in untrusted input does not pollute clone's prototype", () => {
+    const malicious = JSON.parse(`{"__proto__":{"polluted":true},"safe":"bad ${HIGH}"}`);
+    const output = sanitizeSurrogatesDeep(malicious);
+
+    // Sanitization must have triggered (HIGH was lone-replaced)
+    assert.equal(output.safe, `bad ${REPLACEMENT}`);
+    // Prototype must NOT have been mutated
+    const probe = {};
+    assert.equal(probe.polluted, undefined);
+    assert.equal(Object.prototype.polluted, undefined);
+    // The own-property `__proto__` should be reachable via descriptor, not via prototype hijack
+    const desc = Object.getOwnPropertyDescriptor(output, "__proto__");
+    assert.notEqual(desc, undefined);
+  });
+
+  await t.test("constructor key in untrusted input does not hijack output", () => {
+    const malicious = JSON.parse(
+      `{"constructor":{"prototype":{"polluted":true}},"safe":"x${HIGH}"}`
+    );
+    const output = sanitizeSurrogatesDeep(malicious);
+    assert.equal(output.safe, `x${REPLACEMENT}`);
+    const probe = {};
+    assert.equal(probe.polluted, undefined);
   });
 });
 

@@ -352,7 +352,10 @@ export class BaseExecutor {
           continue;
         }
 
-        return { response, url, headers: finalHeaders, transformedBody };
+        // Return the sanitized body so callers (request loggers, attempt logs)
+        // observe what was actually serialized and sent — not the pre-sanitize
+        // shape that may still carry lone surrogates.
+        return { response, url, headers: finalHeaders, transformedBody: safeBody };
       } catch (error) {
         // Distinguish timeout errors from other abort errors
         const err = error instanceof Error ? error : new Error(String(error));
