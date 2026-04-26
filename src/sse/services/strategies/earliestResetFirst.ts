@@ -385,6 +385,16 @@ export function isAffinityValid(conn: ConnectionLike, sessionId: string | null):
 
   if (isTerminalConnectionStatus(conn)) return { valid: false, reason: "terminal" };
 
+  // Mirror the F1 guard from scoreAccount: a connection marked exhausted via
+  // markAccountExhaustedFrom429() has empty `quotas:{}` and `exhausted:true`,
+  // making both tracks return `missing` (not `excluded`). Without this check,
+  // isAffinityValid would keep affinity pinned and the next request to this
+  // account would be sent right back to a 429-exhausted endpoint. Copilot
+  // review on PR #23.
+  if (isAccountQuotaExhausted(conn.id)) {
+    return { valid: false, reason: "quota_exhausted_unknown_reset" };
+  }
+
   const session = getSessionInfo(sessionId);
   if (!session) return { valid: false, reason: "session_expired" };
   if (Date.now() - session.lastActive > SESSION_AFFINITY_WINDOW_MS) {

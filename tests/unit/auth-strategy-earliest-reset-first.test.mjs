@@ -575,6 +575,19 @@ test("Affinity for self-hosted (no cache) connection remains valid", () => {
   assert.equal(out.valid, true, "self-hosted (no cache) bound conn keeps affinity");
 });
 
+test("Affinity break on 429-marked empty cache (Copilot PR #23 review)", () => {
+  // Bound connection was exhausted via markAccountExhaustedFrom429: both
+  // tracks return "missing" (empty quotas), but the cache says exhausted=true.
+  // isAffinityValid must reject so we don't pin to a 429-burning account.
+  const exhaustedId = `exhausted-affinity-${Math.random().toString(36).slice(2)}`;
+  markAccountExhaustedFrom429(exhaustedId, "claude");
+  const sessionId = "test-affinity-429-exhausted";
+  touchSession(sessionId, exhaustedId);
+  const out = isAffinityValid(claudeConn(exhaustedId), sessionId);
+  assert.equal(out.valid, false);
+  assert.equal(out.reason, "quota_exhausted_unknown_reset");
+});
+
 test("isAffinityValid detects rate-limited even when caller leaks one through", () => {
   // Defensive double-check: even if caller passes rate-limited connection
   // through (race window), isAffinityValid catches it.
