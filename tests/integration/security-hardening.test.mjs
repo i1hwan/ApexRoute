@@ -27,7 +27,11 @@ test("Dockerfile uses non-root user", () => {
 test("Dockerfile does not COPY .env or secrets", () => {
   const content = readIfExists("Dockerfile");
   if (!content) return;
-  assert.equal(/COPY.*\.env\b/m.test(content), false, "Dockerfile should not COPY .env files");
+  // Allow templates like .env.example; reject only the real .env file.
+  // The trailing boundary (whitespace, EOL, or non-".") prevents the regex
+  // from matching .env.example, .env.local, etc., which are not secrets.
+  const copiesEnv = /COPY[^\n]*\.env(?![.\w])/m.test(content);
+  assert.equal(copiesEnv, false, "Dockerfile should not COPY .env files");
 });
 
 test(".dockerignore excludes sensitive files", () => {

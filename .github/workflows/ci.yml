@@ -327,6 +327,18 @@ jobs:
     env:
       JWT_SECRET: ci-test-secret-with-sufficient-length-for-validation
       API_KEY_SECRET: ci-test-api-key-secret-long
+      # Inline E2E flags into the Next.js client bundle at build time so
+      # browser-side `process.env.NEXT_PUBLIC_OMNIROUTE_E2E_MODE` evaluates
+      # to "1" and dashboard polling components (MaintenanceBanner,
+      # DegradationBadge, TokenHealthBadge, CloudSyncStatus) skip their
+      # setInterval. Without this the browser bundle inlines `undefined`,
+      # the polling fires every 10s, and `page.waitForLoadState("networkidle")`
+      # never resolves on /dashboard/settings → 15min CI timeout on shard 4.
+      NEXT_PUBLIC_OMNIROUTE_E2E_MODE: "1"
+      OMNIROUTE_DISABLE_BACKGROUND_SERVICES: "1"
+      OMNIROUTE_DISABLE_TOKEN_HEALTHCHECK: "1"
+      OMNIROUTE_DISABLE_LOCAL_HEALTHCHECK: "1"
+      OMNIROUTE_HIDE_HEALTHCHECK_LOGS: "1"
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
