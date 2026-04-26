@@ -1,5 +1,6 @@
 import { register } from "../registry.ts";
 import { FORMATS } from "../formats.ts";
+import { createJsonUnicodeNormalizer } from "../helpers/jsonUnicodeNormalizer.ts";
 
 type OpenAIUsage = {
   prompt_tokens: number;
@@ -94,6 +95,8 @@ export function claudeToOpenAIResponse(chunk, state) {
           },
         };
         state.toolCalls.set(chunk.index, toolCall);
+        if (!state.toolArgNormalizers) state.toolArgNormalizers = new Map();
+        state.toolArgNormalizers.set(chunk.index, createJsonUnicodeNormalizer());
         results.push(createChunk(state, { tool_calls: [toolCall] }));
       }
       break;
@@ -110,17 +113,23 @@ export function claudeToOpenAIResponse(chunk, state) {
       } else if (delta?.type === "input_json_delta" && delta.partial_json) {
         const toolCall = state.toolCalls.get(chunk.index);
         if (toolCall) {
-          toolCall.function.arguments += delta.partial_json;
-          results.push(
-            createChunk(state, {
-              tool_calls: [
-                {
-                  index: toolCall.index,
-                  function: { arguments: delta.partial_json },
-                },
-              ],
-            })
-          );
+          // Fallback to verbatim forwarding if normalizer is missing —
+          // preserves pre-fix behaviour for legacy state shapes.
+          const normalizer = state.toolArgNormalizers?.get(chunk.index);
+          const normalized = normalizer ? normalizer.write(delta.partial_json) : delta.partial_json;
+          toolCall.function.arguments += normalized;
+          if (normalized.length > 0) {
+            results.push(
+              createChunk(state, {
+                tool_calls: [
+                  {
+                    index: toolCall.index,
+                    function: { arguments: normalized },
+                  },
+                ],
+              })
+            );
+          }
         }
       }
       break;
@@ -134,6 +143,30 @@ export function claudeToOpenAIResponse(chunk, state) {
       }
       state.textBlockStarted = false;
       state.thinkingBlockStarted = false;
+
+      // Flush any tail buffered by the tool-arg normalizer (incomplete \u
+      // escape, unpaired high surrogate). Remove ONLY the sidecar entry —
+      // state.toolCalls must remain populated so message_stop / message_delta
+      // can derive finish_reason="tool_calls" via state.toolCalls.size.
+      const normalizer = state.toolArgNormalizers?.get(chunk.index);
+      if (normalizer) {
+        const tail = normalizer.flush();
+        state.toolArgNormalizers.delete(chunk.index);
+        const toolCall = state.toolCalls.get(chunk.index);
+        if (toolCall && tail.length > 0) {
+          toolCall.function.arguments += tail;
+          results.push(
+            createChunk(state, {
+              tool_calls: [
+                {
+                  index: toolCall.index,
+                  function: { arguments: tail },
+                },
+              ],
+            })
+          );
+        }
+      }
       break;
     }
 
