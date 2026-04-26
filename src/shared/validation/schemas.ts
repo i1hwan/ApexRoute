@@ -185,6 +185,7 @@ export const updateSettingsSchema = z.object({
       "least-used",
       "cost-optimized",
       "strict-random",
+      "earliest-reset-first",
     ])
     .optional(),
   wildcardAliases: z.array(z.object({ pattern: z.string(), target: z.string() })).optional(),

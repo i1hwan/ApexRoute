@@ -269,7 +269,8 @@ export async function handleChat(request: any, clientRawRequest: any = null) {
         provider,
         null,
         apiKeyInfo?.allowedConnections ?? null,
-        modelInfo.model || modelString
+        modelInfo.model || modelString,
+        { sessionId }
       );
       if (!creds || creds.allRateLimited) return false;
 
@@ -491,8 +492,9 @@ async function handleSingleModelChat(
         ? {
             allowSuppressedConnections: true,
             bypassQuotaPolicy: true,
+            sessionId: runtimeOptions.sessionId || null,
           }
-        : undefined
+        : { sessionId: runtimeOptions.sessionId || null }
     );
 
     if (!credentials || credentials.allRateLimited) {

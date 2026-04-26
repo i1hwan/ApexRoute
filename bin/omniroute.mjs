@@ -82,7 +82,7 @@ const args = process.argv.slice(2);
 
 if (args.includes("--help") || args.includes("-h")) {
   console.log(`
-  \x1b[1m\x1b[36m⚡ OmniRoute\x1b[0m — Smart AI Router with Auto Fallback
+  \x1b[1m\x1b[36m⚡ ApexRoute\x1b[0m — Smart AI Router with Auto Fallback
 
   \x1b[1mUsage:\x1b[0m
     omniroute                 Start the server
@@ -293,7 +293,7 @@ server.on("exit", (code) => {
 
 // ── Graceful shutdown ──────────────────────────────────────
 function shutdown() {
-  console.log("\n\x1b[33m⏹ Shutting down OmniRoute...\x1b[0m");
+  console.log("\n\x1b[33m⏹ Shutting down ApexRoute...\x1b[0m");
   server.kill("SIGTERM");
   setTimeout(() => {
     server.kill("SIGKILL");
@@ -310,7 +310,7 @@ async function onReady() {
   const apiUrl = `http://localhost:${apiPort}`;
 
   console.log(`
-  \x1b[32m✔ OmniRoute is running!\x1b[0m
+  \x1b[32m✔ ApexRoute is running!\x1b[0m
 
   \x1b[1m  Dashboard:\x1b[0m  ${dashboardUrl}
   \x1b[1m  API Base:\x1b[0m   ${apiUrl}/v1

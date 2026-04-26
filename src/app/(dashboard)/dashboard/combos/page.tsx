@@ -16,13 +16,15 @@ import Tooltip from "@/shared/components/Tooltip";
 import ModelRoutingSection from "@/shared/components/ModelRoutingSection";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { useNotificationStore } from "@/store/notificationStore";
-import { ROUTING_STRATEGIES } from "@/shared/constants/routingStrategies";
+import { ROUTING_STRATEGIES, COMBO_STRATEGY_VALUES } from "@/shared/constants/routingStrategies";
 import { useTranslations } from "next-intl";
 
 // Validate combo name: letters, numbers, -, _, /, .
 const VALID_NAME_REGEX = /^[a-zA-Z0-9_/.-]+$/;
 
-const STRATEGY_OPTIONS = ROUTING_STRATEGIES.map((strategy) => ({
+const STRATEGY_OPTIONS = ROUTING_STRATEGIES.filter((strategy) =>
+  COMBO_STRATEGY_VALUES.includes(strategy.value)
+).map((strategy) => ({
   value: strategy.value,
   labelKey: strategy.labelKey,
   descKey: strategy.combosDescKey,

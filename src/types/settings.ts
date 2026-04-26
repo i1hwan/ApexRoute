@@ -13,7 +13,8 @@ export interface Settings {
     | "random"
     | "least-used"
     | "cost-optimized"
-    | "strict-random";
+    | "strict-random"
+    | "earliest-reset-first";
   stickyRoundRobinLimit: number;
   jwtSecret?: string;
   hideHealthCheckLogs?: boolean;
