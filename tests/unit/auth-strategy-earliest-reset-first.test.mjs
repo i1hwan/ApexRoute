@@ -539,6 +539,51 @@ test("isAffinityValid: rateLimitedUntil ISO string parsed correctly", () => {
     sessionId
   );
   assert.equal(out4.valid, true, "empty string rate limit should not block");
+
+  const out5 = isAffinityValid(
+    claudeConn("gnumax", { rateLimitedUntil: "not-a-real-iso-string" }),
+    "claude-sonnet-4.5",
+    sessionId
+  );
+  assert.equal(
+    out5.valid,
+    true,
+    "invalid ISO string parses to NaN, must not be treated as rate-limited"
+  );
+});
+
+test("isAffinityValid: missing isActive (undefined) should NOT mark as inactive", () => {
+  // Copilot review C2: ConnectionLike.isActive is optional. Only an explicit
+  // `false` should mark a connection inactive — undefined means "field not
+  // populated by the caller", which is common for partial test fixtures.
+  seedClaudeAccount("gnumax", {
+    sessionRem: 50,
+    sessionResetSec: 4080,
+    weeklyRem: 62,
+    weeklyResetSec: 435600,
+    sonnetRem: 100,
+  });
+  const sessionId = "test-isvalid-isactive-undefined";
+  touchSession(sessionId, "gnumax");
+
+  const partialConn = { id: "gnumax" };
+  const out = isAffinityValid(partialConn, "claude-sonnet-4.5", sessionId);
+  assert.equal(out.valid, true, "undefined isActive must not falsely deactivate");
+});
+
+test("scoreWeeklyTrack: overall<5% beats degraded fallback (Copilot C1)", () => {
+  // Copilot review C1: hard exclusion order matters. If an account's overall
+  // weekly is exhausted (<5%), it must be excluded even when the model-specific
+  // window is missing — otherwise we'd happily route to a dead account.
+  setQuotaCache("dryacct", "claude", {
+    "weekly (7d)": {
+      remainingPercentage: 3,
+      resetAt: isoIn(86400),
+    },
+  });
+  const w = scoreWeeklyTrack("dryacct", "claude-sonnet-4.5");
+  assert.equal(w.kind, "excluded");
+  assert.equal(w.reason, "weekly_overall<5%");
 });
 
 // ─── 7. Tie-breaking determinism (Plan v4 §6 #7) ─────────────────────────────

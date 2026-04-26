@@ -174,10 +174,9 @@ export function scoreWeeklyTrack(connId: string, modelHint: string | null): Trac
   const requiredWindow = mapModelToRequiredWeekly(modelHint);
   const modelSpecific = requiredWindow ? getQuotaWindowStatus(connId, requiredWindow, 90) : null;
 
-  if (requiredWindow && !modelSpecific) {
-    return { kind: "degraded", reason: `${requiredWindow}_missing` };
-  }
-
+  // Hard exclusions MUST take precedence over degraded fallback (Copilot review C1):
+  // an account with overall weekly < 5% is genuinely out of quota and must be
+  // excluded even if its model-specific window is missing.
   if (overall && overall.remainingPercentage < MIN_USABLE_REMAINING_PCT) {
     return { kind: "excluded", reason: "weekly_overall<5%", resetAt: overall.resetAt };
   }
@@ -188,6 +187,10 @@ export function scoreWeeklyTrack(connId: string, modelHint: string | null): Trac
       reason: `${requiredWindow || "weekly_model"}<5%`,
       resetAt: modelSpecific.resetAt,
     };
+  }
+
+  if (requiredWindow && !modelSpecific) {
+    return { kind: "degraded", reason: `${requiredWindow}_missing` };
   }
 
   if (!overall && !modelSpecific) return { kind: "missing" };
@@ -331,7 +334,7 @@ export function isAffinityValid(
   modelHint: string | null,
   sessionId: string | null
 ): AffinityValidity {
-  if (!conn.isActive) return { valid: false, reason: "inactive" };
+  if (conn.isActive === false) return { valid: false, reason: "inactive" };
 
   if (conn.rateLimitedUntil) {
     const rl = new Date(conn.rateLimitedUntil).getTime();

@@ -7,9 +7,12 @@
 // names; getQuotaWindowStatus() handles label normalization.
 
 const MODEL_REQUIRED_WEEKLY_WINDOW: Array<{ pattern: RegExp; window: string }> = [
-  { pattern: /^claude-opus(-|$)|claude-.*-opus(-|$)|claude-opus-\d/i, window: "weekly Omelette" },
   {
-    pattern: /^claude-sonnet(-|$)|claude-.*-sonnet(-|$)|claude-sonnet-\d/i,
+    pattern: /^(claude-opus(-|$)|claude-.*-opus(-|$)|claude-opus-\d)/i,
+    window: "weekly Omelette",
+  },
+  {
+    pattern: /^(claude-sonnet(-|$)|claude-.*-sonnet(-|$)|claude-sonnet-\d)/i,
     window: "weekly Sonnet",
   },
 ];
