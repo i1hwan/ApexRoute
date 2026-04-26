@@ -1,6 +1,6 @@
 {
   "name": "omniroute",
-  "version": "3.6.1",
+  "version": "3.7.0",
   "description": "Smart AI Router with auto fallback — route to FREE & cheap models, zero downtime. Works with Cursor, Cline, Claude Desktop, Codex, and any OpenAI-compatible tool.",
   "type": "module",
   "bin": {
@@ -93,7 +93,7 @@
     "@modelcontextprotocol/sdk": "^1.27.1",
     "@monaco-editor/react": "^4.7.0",
     "@swc/helpers": "0.5.21",
-    "axios": "^1.15.0",
+    "axios": "^1.15.2",
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^12.6.2",
     "bottleneck": "^2.19.5",
@@ -182,6 +182,7 @@
     "path-to-regexp": "^8.4.0",
     "hono": "^4.12.12",
     "@hono/node-server": "^1.19.13",
+    "follow-redirects": "^1.16.0",
     "react": "$react",
     "react-dom": "$react-dom"
   }

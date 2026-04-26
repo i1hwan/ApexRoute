@@ -11,7 +11,8 @@ export type RoutingStrategyValue =
   | "strict-random"
   | "auto"
   | "context-optimized"
-  | "lkgp";
+  | "lkgp"
+  | "earliest-reset-first";
 
 type RoutingStrategyOption = {
   value: RoutingStrategyValue;
@@ -113,6 +114,13 @@ export const ROUTING_STRATEGIES: RoutingStrategyOption[] = [
     settingsDescKey: "contextOptDesc",
     icon: "text_snippet",
   },
+  {
+    value: "earliest-reset-first",
+    labelKey: "earliestResetFirst",
+    combosDescKey: "earliestResetFirstDesc",
+    settingsDescKey: "earliestResetFirstDesc",
+    icon: "hourglass_bottom",
+  },
 ];
 
 export const SETTINGS_FALLBACK_STRATEGY_VALUES: RoutingStrategyValue[] = [
@@ -120,6 +128,26 @@ export const SETTINGS_FALLBACK_STRATEGY_VALUES: RoutingStrategyValue[] = [
   "weighted",
   "fill-first",
   "round-robin",
+  "p2c",
+  "random",
+  "least-used",
+  "cost-optimized",
+  "strict-random",
+  "auto",
+  "context-optimized",
+  "lkgp",
+  "earliest-reset-first",
+];
+
+// Combo strategy is a separate dispatch path inside `combo.ts` and only
+// supports a curated subset of values. `earliest-reset-first` is per-provider
+// account selection (auth.ts dispatch) and is intentionally excluded here.
+export const COMBO_STRATEGY_VALUES: RoutingStrategyValue[] = [
+  "priority",
+  "weighted",
+  "round-robin",
+  "context-relay",
+  "fill-first",
   "p2c",
   "random",
   "least-used",

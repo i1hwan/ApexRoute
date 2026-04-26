@@ -9,17 +9,22 @@ export default defineConfig({
   testDir: "./tests/e2e",
   testMatch: ["**/*.spec.ts"],
   fullyParallel: false,
-  timeout: 600_000,
+  // CI: 60s/test so a hung spec fails fast and the spec name reaches the log
+  // (the previous 600s value combined with `reporter: "github"` produced
+  // 13-min silent shard-4 timeouts with no spec-level diagnostics).
+  timeout: process.env.CI ? 60_000 : 600_000,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
+  retries: process.env.CI ? 1 : 0,
   workers: 1,
-  reporter: process.env.CI ? "github" : "html",
+  // CI: line reporter prints each test as it starts/finishes; github reporter
+  // only annotates failures, masking which spec is hanging.
+  reporter: process.env.CI ? [["line"], ["github"]] : "html",
   expect: {
     timeout: process.env.CI ? 30_000 : 10_000,
   },
   use: {
     baseURL: dashboardBaseUrl,
-    navigationTimeout: 300_000,
+    navigationTimeout: process.env.CI ? 30_000 : 300_000,
     trace: "on-first-retry",
     screenshot: "only-on-failure",
   },

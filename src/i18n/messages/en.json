@@ -2055,6 +2055,8 @@
     "costOptDesc": "Prefer cheapest available account",
     "strictRandom": "Strict Random",
     "strictRandomDesc": "Shuffle deck — uses each account once before reshuffling",
+    "earliestResetFirst": "Earliest Reset First",
+    "earliestResetFirstDesc": "Burn down accounts whose quota resets soonest, with 5-min cache affinity",
     "stickyLimit": "Sticky Limit",
     "stickyLimitDesc": "Calls per account before switching",
     "modelAliases": "Model Aliases",

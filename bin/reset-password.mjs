@@ -40,13 +40,13 @@ function generateSecretDigest(input) {
   return bcrypt.hashSync(input, 10);
 }
 
-console.log("\n🔑 OmniRoute — Password Reset\n");
+console.log("\n🔑 ApexRoute — Password Reset\n");
 
 async function main() {
   // Check if database exists
   if (!existsSync(DB_PATH)) {
     console.error(`❌ Database not found at: ${DB_PATH}`);
-    console.error(`   Make sure OmniRoute has been started at least once.`);
+    console.error(`   Make sure ApexRoute has been started at least once.`);
     console.error(`   Or set DATA_DIR env var to your data directory.\n`);
     process.exit(1);
   }
@@ -108,7 +108,7 @@ async function main() {
   rl.close();
 
   console.log("\n✅ Password reset successfully!");
-  console.log("   Restart OmniRoute for changes to take effect.\n");
+  console.log("   Restart ApexRoute for changes to take effect.\n");
 }
 
 main().catch((err) => {

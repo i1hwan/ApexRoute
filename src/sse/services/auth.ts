@@ -17,6 +17,8 @@ import {
   lockModel,
   hasPerModelQuota,
 } from "@omniroute/open-sse/services/accountFallback.ts";
+import { isTerminalConnectionStatus } from "@/sse/services/accountTerminalStatus";
+import { selectByEarliestResetFirst } from "@/sse/services/strategies/earliestResetFirst";
 import {
   isLocalProvider,
   getPassthroughProviders,
@@ -64,6 +66,7 @@ interface RecoverableConnectionState {
 interface CredentialSelectionOptions {
   allowSuppressedConnections?: boolean;
   bypassQuotaPolicy?: boolean;
+  sessionId?: string | null;
 }
 
 const CODEX_QUOTA_THRESHOLD_PERCENT = 90;
@@ -218,15 +221,6 @@ function getEarliestCodexScopeRateLimitedUntil(
   }
 
   return earliest;
-}
-
-function normalizeStatus(value: string | null): string {
-  return (value || "").trim().toLowerCase();
-}
-
-function isTerminalConnectionStatus(connection: ProviderConnectionView): boolean {
-  const status = normalizeStatus(connection.testStatus);
-  return status === "credits_exhausted" || status === "banned" || status === "expired";
 }
 
 export function resolveQuotaLimitPolicy(
@@ -705,6 +699,31 @@ export async function getProviderCredentials(
       const ids = orderedConnections.map((c) => c.id);
       const selectedId = getNextFromDeckSync(`conn:${provider}`, ids);
       connection = orderedConnections.find((c) => c.id === selectedId) || orderedConnections[0];
+    } else if (strategy === "earliest-reset-first") {
+      // Cache-aware burn-down: route to the account whose quota resets soonest,
+      // with affinity to the same account within a 5-min sliding window. See
+      // .sisyphus/plans/routing-strategy-v4.md and earliestResetFirst.ts.
+      const result = selectByEarliestResetFirst(
+        orderedConnections,
+        requestedModel,
+        options.sessionId || null
+      );
+      if ("allExcluded" in result) {
+        log.warn(
+          "AUTH",
+          `${provider} | earliest-reset-first: all candidates excluded`,
+          result.excludedBreakdown
+        );
+        return {
+          allRateLimited: true,
+          retryAfter: result.retryAfterIso,
+          retryAfterHuman: result.retryAfter ? formatRetryAfter(result.retryAfter) : "soon",
+        };
+      }
+      connection = result.selected as (typeof orderedConnections)[number];
+      await updateProviderConnection(connection.id, {
+        lastUsedAt: new Date().toISOString(),
+      });
     } else {
       // Default: fill-first (already sorted by priority in getProviderConnections)
       connection = orderedConnections[0];

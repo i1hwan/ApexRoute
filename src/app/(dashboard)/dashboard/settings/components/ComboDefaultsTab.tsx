@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { Card, Button, Input, Toggle } from "@/shared/components";
 import { cn } from "@/shared/utils/cn";
-import { ROUTING_STRATEGIES } from "@/shared/constants/routingStrategies";
+import { ROUTING_STRATEGIES, COMBO_STRATEGY_VALUES } from "@/shared/constants/routingStrategies";
 import { useTranslations } from "next-intl";
 
 const STRATEGY_LABEL_FALLBACKS: Record<string, string> = {
@@ -37,7 +37,9 @@ export default function ComboDefaultsTab() {
   const [saving, setSaving] = useState(false);
   const t = useTranslations("settings");
   const tc = useTranslations("common");
-  const strategyOptions = ROUTING_STRATEGIES.map((strategy) => ({
+  const strategyOptions = ROUTING_STRATEGIES.filter((strategy) =>
+    COMBO_STRATEGY_VALUES.includes(strategy.value)
+  ).map((strategy) => ({
     value: strategy.value,
     label: translateOrFallback(
       t,

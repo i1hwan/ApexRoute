@@ -4,6 +4,21 @@
 
 ---
 
+## [3.7.0] — 2026-04-26
+
+### ✨ New Features
+
+- **Earliest-Reset-First Routing Strategy:** New opt-in per-provider strategy that prioritizes provider accounts whose quota will reset soonest (burn-down), with a 5-minute conversation affinity window aligned to Anthropic's prompt cache TTL. Score formula `0.85 * T_pts + 0.15 * min(Q, 30)` with stepwise time bands and hard exclusion below 5%. Default `fill-first` strategy unchanged — opt-in only via dashboard.
+- **ApexRoute Branding (User-Visible):** CLI banners, dashboard `APP_CONFIG.name`, and HTTP `User-Agent` headers updated from "OmniRoute" to "ApexRoute". Internal identifiers (npm package name, `OMNIROUTE_*` env vars, `omniroute_*` MCP tool prefixes, `~/.omniroute/` data dir) preserved for backward compatibility.
+- **Shared Terminal-Status Helper:** Extracted `isTerminalConnectionStatus()` from `auth.ts` into `src/sse/services/accountTerminalStatus.ts` so multiple modules can share the same logic without drift.
+
+### 🔧 Internal
+
+- Added `COMBO_STRATEGY_VALUES` constant to filter combo-eligible strategies (excludes `earliest-reset-first` since combo dispatch is separate).
+- `getProviderCredentials()` now accepts an optional `sessionId` to enable conversation affinity in opt-in strategies.
+
+---
+
 ## [3.6.1] — 2026-04-10
 
 ### ✨ New Features
