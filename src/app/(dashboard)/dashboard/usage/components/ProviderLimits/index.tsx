@@ -17,6 +17,7 @@ import { CardSkeleton } from "@/shared/components/Loading";
 import { USAGE_SUPPORTED_PROVIDERS } from "@/shared/constants/providers";
 import { pickMaskedDisplayValue } from "@/shared/utils/maskEmail";
 import RoutingBadge, { type RoutingPreviewEntry } from "./RoutingBadge";
+import RoutingTransparencyBanner from "./RoutingTransparencyBanner";
 
 const LS_GROUP_BY = "omniroute:limits:groupBy";
 const LS_EXPANDED_GROUPS = "omniroute:limits:expandedGroups";
@@ -91,7 +92,7 @@ export default function ProviderLimits() {
   const [routingByConnection, setRoutingByConnection] = useState<
     Record<string, RoutingPreviewEntry>
   >({});
-  const [, setConfiguredRoutingStrategy] = useState<string>("fill-first");
+  const [configuredRoutingStrategy, setConfiguredRoutingStrategy] = useState<string>("fill-first");
   const [groupBy, setGroupBy] = useState<"none" | "environment">(() => {
     if (typeof window === "undefined") return "none";
     const saved = localStorage.getItem(LS_GROUP_BY);
@@ -505,6 +506,13 @@ export default function ProviderLimits() {
         </div>
       </div>
 
+      <RoutingTransparencyBanner
+        routing={routingByConnection}
+        configuredStrategy={configuredRoutingStrategy}
+        connections={visibleConnections}
+        providerConfig={PROVIDER_CONFIG}
+      />
+
       {/* Tier Filters */}
       <div className="flex items-center gap-2 flex-wrap">
         {TIER_FILTERS.map((tier) => {
@@ -559,6 +567,7 @@ export default function ProviderLimits() {
             return (
               <div
                 key={conn.id}
+                data-connection-id={conn.id}
                 className="items-center px-4 py-3.5 transition-[background] duration-150 hover:bg-black/[0.03] dark:hover:bg-white/[0.02]"
                 style={{
                   display: "grid",
