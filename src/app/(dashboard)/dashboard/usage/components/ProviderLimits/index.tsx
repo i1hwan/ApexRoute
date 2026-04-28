@@ -19,6 +19,7 @@ import { pickMaskedDisplayValue } from "@/shared/utils/maskEmail";
 import RoutingBadge, { type RoutingPreviewEntry } from "./RoutingBadge";
 import RoutingTransparencyBanner from "./RoutingTransparencyBanner";
 import AutoRefreshControl from "./AutoRefreshControl";
+import QuotaVisualization from "./QuotaVisualization";
 
 const LS_GROUP_BY = "omniroute:limits:groupBy";
 const LS_EXPANDED_GROUPS = "omniroute:limits:expandedGroups";
@@ -642,63 +643,66 @@ export default function ProviderLimits() {
                   ) : quota?.message && (!quota.quotas || quota.quotas.length === 0) ? (
                     <div className="text-xs text-text-muted italic">{quota.message}</div>
                   ) : quota?.quotas?.length > 0 ? (
-                    quota.quotas.map((q, i) => {
-                      const remainingPercentage = q.unlimited
-                        ? 100
-                        : (q.remainingPercentage ?? calculatePercentage(q.used, q.total));
-                      const colors = getBarColor(remainingPercentage);
-                      const cd = formatCountdown(q.resetAt);
-                      const shortName = formatQuotaLabel(q.name);
-                      const staleAfterReset = q.staleAfterReset === true;
+                    <>
+                      <QuotaVisualization quotas={quota.quotas} />
+                      {quota.quotas.map((q, i) => {
+                        const remainingPercentage = q.unlimited
+                          ? 100
+                          : (q.remainingPercentage ?? calculatePercentage(q.used, q.total));
+                        const colors = getBarColor(remainingPercentage);
+                        const cd = formatCountdown(q.resetAt);
+                        const shortName = formatQuotaLabel(q.name);
+                        const staleAfterReset = q.staleAfterReset === true;
 
-                      return (
-                        <div
-                          key={i}
-                          className={`flex items-center gap-1.5 min-w-[200px] shrink-0 ${
-                            i > 0 ? "border-l border-border/80 pl-3 ml-1" : ""
-                          }`}
-                        >
-                          {/* Model label */}
-                          <span
-                            title={q.modelKey || q.name}
-                            className="text-[11px] font-semibold py-0.5 px-2 rounded whitespace-nowrap min-w-[60px] text-center"
-                            style={{ background: colors.bg, color: colors.text }}
+                        return (
+                          <div
+                            key={i}
+                            className={`flex items-center gap-1.5 min-w-[200px] shrink-0 ${
+                              i > 0 ? "border-l border-border/80 pl-3 ml-1" : ""
+                            }`}
                           >
-                            {shortName}
-                          </span>
-
-                          {/* Countdown */}
-                          {staleAfterReset ? (
-                            <span className="text-[10px] text-text-muted whitespace-nowrap">
-                              ⟳ Refreshing...
+                            {/* Model label */}
+                            <span
+                              title={q.modelKey || q.name}
+                              className="text-[11px] font-semibold py-0.5 px-2 rounded whitespace-nowrap min-w-[60px] text-center"
+                              style={{ background: colors.bg, color: colors.text }}
+                            >
+                              {shortName}
                             </span>
-                          ) : cd ? (
-                            <span className="text-[10px] text-text-muted whitespace-nowrap">
-                              ⏱ {cd}
-                            </span>
-                          ) : null}
 
-                          {/* Progress bar */}
-                          <div className="flex-1 h-1.5 rounded-sm bg-black/[0.06] dark:bg-white/[0.06] min-w-[60px] overflow-hidden">
-                            <div
-                              className="h-full rounded-sm transition-[width] duration-300 ease-out"
-                              style={{
-                                width: `${Math.min(remainingPercentage, 100)}%`,
-                                background: colors.bar,
-                              }}
-                            />
+                            {/* Countdown */}
+                            {staleAfterReset ? (
+                              <span className="text-[10px] text-text-muted whitespace-nowrap">
+                                ⟳ Refreshing...
+                              </span>
+                            ) : cd ? (
+                              <span className="text-[10px] text-text-muted whitespace-nowrap">
+                                ⏱ {cd}
+                              </span>
+                            ) : null}
+
+                            {/* Progress bar */}
+                            <div className="flex-1 h-1.5 rounded-sm bg-black/[0.06] dark:bg-white/[0.06] min-w-[60px] overflow-hidden">
+                              <div
+                                className="h-full rounded-sm transition-[width] duration-300 ease-out"
+                                style={{
+                                  width: `${Math.min(remainingPercentage, 100)}%`,
+                                  background: colors.bar,
+                                }}
+                              />
+                            </div>
+
+                            {/* Percentage */}
+                            <span
+                              className="text-[11px] font-semibold min-w-[32px] text-right"
+                              style={{ color: colors.text }}
+                            >
+                              {remainingPercentage}%
+                            </span>
                           </div>
-
-                          {/* Percentage */}
-                          <span
-                            className="text-[11px] font-semibold min-w-[32px] text-right"
-                            style={{ color: colors.text }}
-                          >
-                            {remainingPercentage}%
-                          </span>
-                        </div>
-                      );
-                    })
+                        );
+                      })}
+                    </>
                   ) : (
                     <div className="text-xs text-text-muted italic">{t("noQuotaData")}</div>
                   )}
