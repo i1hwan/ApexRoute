@@ -157,3 +157,10 @@ export const COMBO_STRATEGY_VALUES: RoutingStrategyValue[] = [
   "context-optimized",
   "lkgp",
 ];
+
+export function normalizeConfiguredStrategy(raw: string | null | undefined): RoutingStrategyValue {
+  if (raw && (SETTINGS_FALLBACK_STRATEGY_VALUES as readonly string[]).includes(raw)) {
+    return raw as RoutingStrategyValue;
+  }
+  return "fill-first";
+}
