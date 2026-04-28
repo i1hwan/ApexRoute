@@ -4,6 +4,32 @@
 
 ---
 
+## [3.8.0] — 2026-04-28
+
+### ✨ Features
+
+- **Provider Limits Dashboard — Routing Priority Badge:** Each account row now shows a per-provider routing rank under the configured fallback strategy. For `earliest-reset-first`: solid "Next" chip on the account that will be picked first within its provider, ghost `P{n}` chips on the rest, and a diagonal-stripe ghost chip with localized reason for accounts pre-filtered out (inactive / rate-limited / terminal) or scoring-excluded (`quota_exhausted_unknown_reset`). Hover/focus on any badge reveals a self-contained tooltip with the full score breakdown (session %, weekly %, session/weekly points, base score = average of known track scores, error/backoff/degraded penalties, final score). For non-ERF strategies, only excluded accounts surface (no numeric rank).
+- **Provider Limits Dashboard — Configurable Auto-Refresh:** New checkbox toggle + interval dropdown (1m / 2m / 5m / 10m) next to the manual "Refresh All" button. Persisted to localStorage, polls only when `document.visibilityState === "visible"`, runs an immediate refresh on tab focus (hidden → visible), and uses ref-based guards (`inFlightRef` + 1s `lastTriggerAtRef`) to defeat the same-tick race between `setInterval` and `visibilitychange`.
+- **Provider Limits Dashboard — Routing Transparency Banner:** Single-line info row above the account list showing `Configured: <strategy>` and, for ERF, `Next per provider: Claude (acct-A), GLM (acct-B)`. Provider/account pairs are clickable buttons that scroll to that provider's first row. A trailing info icon hovers to the disclaimer that this is a quota-priority preview, not a full request-level prediction (per-request model lockout at `auth.ts:439` is not reproduced).
+- **Provider Limits Dashboard — Dual Session/Weekly Bars:** Each account row now leads its quota cell with two compact mini-bars showing session and weekly remaining percentages, in addition to the existing per-model bars.
+- **API:** `GET` and `POST /api/usage/provider-limits` now additionally return `routing` (a `Record<connectionId, RoutingPreviewEntry>` map) and `configuredRoutingStrategy` (normalized configured fallback strategy). The endpoint is now documented in `docs/openapi.yaml`.
+- **Strategy Helpers:** New `normalizeConfiguredStrategy` exported from `src/shared/constants/routingStrategies.ts`. Returns the input value if it appears in `SETTINGS_FALLBACK_STRATEGY_VALUES`, otherwise `"fill-first"`. Mirrors `auth.ts:571`'s runtime fall-through behavior in a shared helper.
+
+### 🌐 Internationalization
+
+- 30 new keys under the `usage` namespace covering routing-priority labels, score-breakdown rows, transparency-banner strings, and the auto-refresh control. English and Korean hand-translated; the other 30 locales seeded with English placeholder values to prevent users from seeing raw `usage.<key>` strings.
+
+### 📚 Internal Notes
+
+- `computeRouting` in the API route mirrors `auth.ts:431-442`'s eligibility filter (inactive / `isAccountUnavailable` / `isTerminalConnectionStatus`) BEFORE calling `scoreAccount`, so the dashboard cannot label production-ineligible rows as "Next". `isAccountUnavailable` imported from `@omniroute/open-sse/services/accountFallback` (verified path).
+- `rateLimitedUntil` accepts `string | number` (epoch); coerced via `rateLimitedSentinel` before the eligibility check.
+- Per-request model context (`requestedModel`, `excludeConnectionId`, `allowedConnections`, model lockout) is deliberately NOT replicated — the dashboard has no request model. The badge is a quota-priority preview, not a full prediction. The transparency banner's info icon surfaces this disclaimer.
+- After every per-row `/api/usage/[connectionId]` success, a lightweight `GET /api/usage/provider-limits` re-fetch updates `routingByConnection` and `configuredRoutingStrategy` only — quota bars come from the per-row fetch, routing comes from the batch.
+- 17 new unit tests (7 for `normalizeConfiguredStrategy`, 10 for `computeRouting`). Full unit suite: 2811/2811 PASS (was 2794).
+- Plan: `.sisyphus/plans/provider-limits-priority-and-autorefresh.md` (v3.1, after Oracle review on v1/v2/v3).
+
+---
+
 ## [3.7.1] — 2026-04-27
 
 ### 🐛 Bug Fixes
