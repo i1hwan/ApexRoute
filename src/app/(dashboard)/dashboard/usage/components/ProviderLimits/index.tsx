@@ -18,6 +18,7 @@ import { USAGE_SUPPORTED_PROVIDERS } from "@/shared/constants/providers";
 import { pickMaskedDisplayValue } from "@/shared/utils/maskEmail";
 import RoutingBadge, { type RoutingPreviewEntry } from "./RoutingBadge";
 import RoutingTransparencyBanner from "./RoutingTransparencyBanner";
+import AutoRefreshControl from "./AutoRefreshControl";
 
 const LS_GROUP_BY = "omniroute:limits:groupBy";
 const LS_EXPANDED_GROUPS = "omniroute:limits:expandedGroups";
@@ -503,6 +504,8 @@ export default function ProviderLimits() {
             </span>
             {t("refreshAll")}
           </button>
+
+          <AutoRefreshControl onTrigger={refreshAll} />
         </div>
       </div>
 
