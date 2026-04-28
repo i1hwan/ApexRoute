@@ -16,6 +16,7 @@ import Badge from "@/shared/components/Badge";
 import { CardSkeleton } from "@/shared/components/Loading";
 import { USAGE_SUPPORTED_PROVIDERS } from "@/shared/constants/providers";
 import { pickMaskedDisplayValue } from "@/shared/utils/maskEmail";
+import RoutingBadge, { type RoutingPreviewEntry } from "./RoutingBadge";
 
 const LS_GROUP_BY = "omniroute:limits:groupBy";
 const LS_EXPANDED_GROUPS = "omniroute:limits:expandedGroups";
@@ -87,6 +88,10 @@ export default function ProviderLimits() {
   const [refreshingAll, setRefreshingAll] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const [tierFilter, setTierFilter] = useState("all");
+  const [routingByConnection, setRoutingByConnection] = useState<
+    Record<string, RoutingPreviewEntry>
+  >({});
+  const [, setConfiguredRoutingStrategy] = useState<string>("fill-first");
   const [groupBy, setGroupBy] = useState<"none" | "environment">(() => {
     if (typeof window === "undefined") return "none";
     const saved = localStorage.getItem(LS_GROUP_BY);
@@ -149,9 +154,31 @@ export default function ProviderLimits() {
       const response = await fetch("/api/usage/provider-limits");
       if (!response.ok) throw new Error("Failed");
       const data = await response.json();
+      if (data.routing && typeof data.routing === "object") {
+        setRoutingByConnection(data.routing as Record<string, RoutingPreviewEntry>);
+      }
+      if (typeof data.configuredRoutingStrategy === "string") {
+        setConfiguredRoutingStrategy(data.configuredRoutingStrategy);
+      }
       return data.caches || {};
     } catch {
       return {};
+    }
+  }, []);
+
+  const refreshRoutingOnly = useCallback(async () => {
+    try {
+      const r = await fetch("/api/usage/provider-limits");
+      if (!r.ok) return;
+      const j = await r.json();
+      if (j.routing && typeof j.routing === "object") {
+        setRoutingByConnection(j.routing as Record<string, RoutingPreviewEntry>);
+      }
+      if (typeof j.configuredRoutingStrategy === "string") {
+        setConfiguredRoutingStrategy(j.configuredRoutingStrategy);
+      }
+    } catch {
+      // best-effort routing refresh; main quota path is independent
     }
   }, []);
 
@@ -212,6 +239,7 @@ export default function ProviderLimits() {
           ...prev,
           [connectionId]: new Date().toISOString(),
         }));
+        void refreshRoutingOnly();
       } catch (error) {
         setErrors((prev) => ({
           ...prev,
@@ -221,7 +249,7 @@ export default function ProviderLimits() {
         setLoading((prev) => ({ ...prev, [connectionId]: false }));
       }
     },
-    []
+    [refreshRoutingOnly]
   );
 
   const refreshProvider = useCallback(
@@ -246,6 +274,12 @@ export default function ProviderLimits() {
       const connectionList = await fetchConnections();
       applyCachedQuotaState(connectionList, data.caches || {});
       setErrors(data.errors || {});
+      if (data.routing && typeof data.routing === "object") {
+        setRoutingByConnection(data.routing as Record<string, RoutingPreviewEntry>);
+      }
+      if (typeof data.configuredRoutingStrategy === "string") {
+        setConfiguredRoutingStrategy(data.configuredRoutingStrategy);
+      }
     } catch (error) {
       console.error("Error refreshing all:", error);
     } finally {
@@ -569,6 +603,7 @@ export default function ProviderLimits() {
                           {tierMeta.label}
                         </Badge>
                       </span>
+                      <RoutingBadge entry={routingByConnection[conn.id]} />
                       <span className="text-[11px] leading-none text-text-muted">
                         {config.label}
                       </span>
