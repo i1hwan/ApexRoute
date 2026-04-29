@@ -34,7 +34,7 @@ interface NextEntryByProvider {
   providerLabel: string;
   accountName: string | null;
   allExcluded: boolean;
-  firstConnId: string | null;
+  nextConnId: string | null;
 }
 
 function collectNextPerProvider(
@@ -73,7 +73,7 @@ function collectNextPerProvider(
           )
         : null,
       allExcluded: nonExcludedCount === 0,
-      firstConnId: group[0]?.id ?? null,
+      nextConnId: nextConn?.id ?? null,
     });
   }
   return out;
@@ -116,14 +116,18 @@ export default function RoutingTransparencyBanner({
                     {e.providerLabel}{" "}
                     <span className="opacity-60">({t("transparencyBannerAllExcluded")})</span>
                   </span>
-                ) : (
+                ) : e.nextConnId ? (
                   <button
                     type="button"
-                    onClick={() => scrollToConnection(e.firstConnId)}
+                    onClick={() => scrollToConnection(e.nextConnId)}
                     className="underline decoration-dotted underline-offset-2 hover:text-text-main cursor-pointer bg-transparent border-0 p-0 m-0 text-inherit"
                   >
                     {e.providerLabel} <span className="opacity-70">({e.accountName ?? "—"})</span>
                   </button>
+                ) : (
+                  <span>
+                    {e.providerLabel} <span className="opacity-70">({e.accountName ?? "—"})</span>
+                  </span>
                 )}
               </span>
             ))}
