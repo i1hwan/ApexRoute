@@ -2,6 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import { calculatePercentage } from "./utils";
+import { getBarColor } from "./quotaColors";
 
 interface QuotaItem {
   name?: string;
@@ -14,16 +15,6 @@ interface QuotaItem {
 
 interface QuotaVisualizationProps {
   quotas: QuotaItem[] | null | undefined;
-}
-
-function getBarColor(remainingPct: number): { bar: string; bg: string; text: string } {
-  if (remainingPct > 50) {
-    return { bar: "#22c55e", bg: "rgba(34,197,94,0.12)", text: "#22c55e" };
-  }
-  if (remainingPct > 20) {
-    return { bar: "#eab308", bg: "rgba(234,179,8,0.12)", text: "#eab308" };
-  }
-  return { bar: "#ef4444", bg: "rgba(239,68,68,0.12)", text: "#ef4444" };
 }
 
 function pickWindow(quotas: QuotaItem[], windowKey: string): QuotaItem | null {

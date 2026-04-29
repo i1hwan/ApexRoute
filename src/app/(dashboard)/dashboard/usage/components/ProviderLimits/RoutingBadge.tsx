@@ -10,6 +10,10 @@ export type {
   RoutingPreviewEntry,
 } from "@/shared/contracts/routingPreview";
 
+// Brief grace period after pointer leave so cursor can travel from badge
+// to tooltip without flicker. UX value preserved exactly from PR #25.
+const TOOLTIP_CLOSE_DELAY_MS = 80;
+
 interface RoutingBadgeProps {
   entry?: RoutingPreviewEntry;
 }
@@ -49,7 +53,7 @@ export default function RoutingBadge({ entry }: RoutingBadgeProps) {
 
   const hide = useCallback(() => {
     if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
-    closeTimerRef.current = setTimeout(() => setOpen(false), 80);
+    closeTimerRef.current = setTimeout(() => setOpen(false), TOOLTIP_CLOSE_DELAY_MS);
   }, []);
 
   useEffect(() => {
