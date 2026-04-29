@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 const route = await import("../../src/app/api/usage/provider-limits/route.ts");
 const quotaCache = await import("../../src/domain/quotaCache.ts");
 
-const { computeRouting } = route;
+const { computeRouting, mergeIntoResponseBody } = route;
 const { setQuotaCache } = quotaCache;
 
 function freshSetup(prefix) {
@@ -182,4 +182,56 @@ test("computeRouting: skips entries without id or provider (defensive)", () => {
   const out = computeRouting(conns, "earliest-reset-first");
   assert.equal(Object.keys(out).length, 1);
   assert.ok(out[`${prefix}-a`]);
+});
+
+test("mergeIntoResponseBody: authoritative base.caches wins over extra.caches (Copilot PR #25 review)", () => {
+  const partialSyncResult = {
+    caches: { "conn-a": { quotas: {}, plan: null, fetchedAt: "ts", source: "manual" } },
+    errors: { "conn-b": "upstream 500" },
+    total: 2,
+    succeeded: 1,
+    failed: 1,
+  };
+  const fullCache = {
+    "conn-a": { quotas: {}, plan: null, fetchedAt: "ts", source: "manual" },
+    "conn-b": { quotas: {}, plan: null, fetchedAt: "ts-old", source: "manual" },
+  };
+  const out = mergeIntoResponseBody(partialSyncResult, {
+    caches: fullCache,
+    intervalMinutes: 70,
+    lastAutoSyncAt: null,
+    routing: {},
+    configuredRoutingStrategy: "earliest-reset-first",
+  });
+  assert.equal(Object.keys(out.caches).length, 2, "both A and B preserved (authoritative wins)");
+  assert.ok(out.caches["conn-b"], "conn-b not dropped by partial sync result");
+  assert.deepEqual(out.errors, { "conn-b": "upstream 500" }, "errors preserved through restExtra");
+  assert.equal(out.total, 2);
+  assert.equal(out.succeeded, 1);
+  assert.equal(out.failed, 1);
+  assert.equal(out.intervalMinutes, 70);
+  assert.equal(out.configuredRoutingStrategy, "earliest-reset-first");
+  assert.deepEqual(out.routing, {});
+});
+
+test("mergeIntoResponseBody: also drops routing/configuredRoutingStrategy from extra (defensive)", () => {
+  const adversarialExtra = {
+    caches: { phantom: {} },
+    routing: { phantom: { strategy: "x", rank: 1, isNext: true } },
+    configuredRoutingStrategy: "garbage-strategy",
+    errors: { real: "preserved" },
+  };
+  const out = mergeIntoResponseBody(adversarialExtra, {
+    caches: { real: { quotas: {}, plan: null, fetchedAt: "ts", source: "manual" } },
+    intervalMinutes: 70,
+    lastAutoSyncAt: null,
+    routing: {},
+    configuredRoutingStrategy: "earliest-reset-first",
+  });
+  assert.equal(Object.keys(out.caches).length, 1);
+  assert.ok(out.caches.real);
+  assert.equal(out.caches.phantom, undefined);
+  assert.deepEqual(out.routing, {});
+  assert.equal(out.configuredRoutingStrategy, "earliest-reset-first");
+  assert.deepEqual(out.errors, { real: "preserved" });
 });

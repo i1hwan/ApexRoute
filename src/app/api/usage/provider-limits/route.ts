@@ -185,6 +185,35 @@ export function computeRouting(
   return map;
 }
 
+interface ResponseBodyBase {
+  caches: ReturnType<typeof getCachedProviderLimitsMap>;
+  intervalMinutes: number;
+  lastAutoSyncAt: string | null;
+  routing: RoutingPreviewMap;
+  configuredRoutingStrategy: RoutingStrategyValue;
+}
+
+export function mergeIntoResponseBody(
+  extra: Record<string, unknown>,
+  base: ResponseBodyBase
+): Record<string, unknown> {
+  // Drop any caches/routing/configuredRoutingStrategy keys from `extra` so a
+  // partial-failure result from syncAllProviderLimits cannot override the full
+  // disk cache map or stale-overwrite the freshly computed routing preview.
+  // Authoritative fields from `base` win.
+  const {
+    caches: _ignoredExtraCaches,
+    routing: _ignoredExtraRouting,
+    configuredRoutingStrategy: _ignoredExtraStrategy,
+    ...restExtra
+  } = extra as {
+    caches?: unknown;
+    routing?: unknown;
+    configuredRoutingStrategy?: unknown;
+  } & Record<string, unknown>;
+  return { ...restExtra, ...base };
+}
+
 async function buildResponseBody(extra: Record<string, unknown> = {}) {
   const settings = await getSettings();
   const configuredStrategy = normalizeConfiguredStrategy(
@@ -193,14 +222,13 @@ async function buildResponseBody(extra: Record<string, unknown> = {}) {
   const connections = (await getProviderConnections({})) as ConnectionRow[];
   const routing = computeRouting(connections, configuredStrategy);
 
-  return {
+  return mergeIntoResponseBody(extra, {
     caches: getCachedProviderLimitsMap(),
     intervalMinutes: getProviderLimitsSyncIntervalMinutes(),
     lastAutoSyncAt: await getLastProviderLimitsAutoSyncTime(),
     routing,
     configuredRoutingStrategy: configuredStrategy,
-    ...extra,
-  };
+  });
 }
 
 /**
