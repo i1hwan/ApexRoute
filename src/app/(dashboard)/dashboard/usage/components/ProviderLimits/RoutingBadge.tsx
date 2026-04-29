@@ -3,28 +3,12 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useTranslations } from "next-intl";
 import Badge from "@/shared/components/Badge";
+import type { RoutingPreviewEntry } from "@/shared/contracts/routingPreview";
 
-export interface RoutingPreviewBreakdown {
-  sessionPoints: number | null;
-  weeklyPoints: number | null;
-  sessionRemainingPct: number | null;
-  weeklyRemainingPct: number | null;
-  baseScore: number | null;
-  penaltyError: number;
-  penaltyBackoff: number;
-  penaltyDegraded: number;
-  finalScore: number | null;
-}
-
-export interface RoutingPreviewEntry {
-  strategy: string;
-  rank: number | null;
-  isNext: boolean;
-  excluded: boolean;
-  excludedReason: string | null;
-  score: number | null;
-  breakdown: RoutingPreviewBreakdown | null;
-}
+export type {
+  RoutingPreviewBreakdown,
+  RoutingPreviewEntry,
+} from "@/shared/contracts/routingPreview";
 
 interface RoutingBadgeProps {
   entry?: RoutingPreviewEntry;

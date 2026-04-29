@@ -14,28 +14,9 @@ import {
 import { scoreAccount, candidateComparator } from "@/sse/services/strategies/earliestResetFirst";
 import { isTerminalConnectionStatus } from "@/sse/services/accountTerminalStatus";
 import { isAccountUnavailable } from "@omniroute/open-sse/services/accountFallback";
+import type { RoutingPreviewEntry, RoutingPreviewMap } from "@/shared/contracts/routingPreview";
 
-export interface RoutingPreviewEntry {
-  strategy: string;
-  rank: number | null;
-  isNext: boolean;
-  excluded: boolean;
-  excludedReason: string | null;
-  score: number | null;
-  breakdown: {
-    sessionPoints: number | null;
-    weeklyPoints: number | null;
-    sessionRemainingPct: number | null;
-    weeklyRemainingPct: number | null;
-    baseScore: number | null;
-    penaltyError: number;
-    penaltyBackoff: number;
-    penaltyDegraded: number;
-    finalScore: number | null;
-  } | null;
-}
-
-export type RoutingPreviewMap = Record<string, RoutingPreviewEntry>;
+export type { RoutingPreviewEntry, RoutingPreviewMap } from "@/shared/contracts/routingPreview";
 
 interface ConnectionRow {
   id: string;
@@ -106,13 +87,15 @@ function isInactive(c: ConnectionRow): boolean {
   return c.isActive === false || c.isActive === 0;
 }
 
-function rateLimitedSentinel(value: string | number | null | undefined): string | null {
-  if (value === null || value === undefined) return null;
-  if (typeof value === "number") {
-    if (!Number.isFinite(value)) return null;
-    return new Date(value).toISOString();
+function checkEligibility(c: ConnectionRow, strategy: string): RoutingPreviewEntry | null {
+  if (isInactive(c)) return makeExcludedEntry(strategy, "inactive");
+  if (c.rateLimitedUntil != null && isAccountUnavailable(c.rateLimitedUntil as never)) {
+    return makeExcludedEntry(strategy, "rate_limited");
   }
-  return value;
+  if (isTerminalConnectionStatus(c as Parameters<typeof isTerminalConnectionStatus>[0])) {
+    return makeExcludedEntry(strategy, "terminal");
+  }
+  return null;
 }
 
 export function computeRouting(
@@ -131,17 +114,9 @@ export function computeRouting(
     if (strategy === "earliest-reset-first") {
       const eligible: ConnectionRow[] = [];
       for (const c of group) {
-        if (isInactive(c)) {
-          map[c.id] = makeExcludedEntry(strategy, "inactive");
-          continue;
-        }
-        const rl = rateLimitedSentinel(c.rateLimitedUntil);
-        if (rl !== null && isAccountUnavailable(rl)) {
-          map[c.id] = makeExcludedEntry(strategy, "rate_limited");
-          continue;
-        }
-        if (isTerminalConnectionStatus(c as Parameters<typeof isTerminalConnectionStatus>[0])) {
-          map[c.id] = makeExcludedEntry(strategy, "terminal");
+        const excluded = checkEligibility(c, strategy);
+        if (excluded) {
+          map[c.id] = excluded;
           continue;
         }
         eligible.push(c);
@@ -156,17 +131,9 @@ export function computeRouting(
       }
     } else {
       for (const c of group) {
-        if (isInactive(c)) {
-          map[c.id] = makeExcludedEntry(strategy, "inactive");
-          continue;
-        }
-        const rl = rateLimitedSentinel(c.rateLimitedUntil);
-        if (rl !== null && isAccountUnavailable(rl)) {
-          map[c.id] = makeExcludedEntry(strategy, "rate_limited");
-          continue;
-        }
-        if (isTerminalConnectionStatus(c as Parameters<typeof isTerminalConnectionStatus>[0])) {
-          map[c.id] = makeExcludedEntry(strategy, "terminal");
+        const excluded = checkEligibility(c, strategy);
+        if (excluded) {
+          map[c.id] = excluded;
           continue;
         }
         map[c.id] = {

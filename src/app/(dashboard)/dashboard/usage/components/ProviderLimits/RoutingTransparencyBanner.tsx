@@ -2,7 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import { pickMaskedDisplayValue } from "@/shared/utils/maskEmail";
-import type { RoutingPreviewEntry } from "./RoutingBadge";
+import type { RoutingPreviewEntry } from "@/shared/contracts/routingPreview";
 
 interface ConnectionLite {
   id: string;
