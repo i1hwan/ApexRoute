@@ -107,7 +107,7 @@ export default function RoutingBadge({ entry }: RoutingBadgeProps) {
               <BreakdownRow
                 label={t("routingScoreSession")}
                 value={
-                  entry.breakdown?.sessionRemainingPct !== null
+                  Number.isFinite(entry.breakdown?.sessionRemainingPct)
                     ? `${formatNum(entry.breakdown?.sessionRemainingPct, 0)}%`
                     : "—"
                 }
@@ -115,7 +115,7 @@ export default function RoutingBadge({ entry }: RoutingBadgeProps) {
               <BreakdownRow
                 label={t("routingScoreWeekly")}
                 value={
-                  entry.breakdown?.weeklyRemainingPct !== null
+                  Number.isFinite(entry.breakdown?.weeklyRemainingPct)
                     ? `${formatNum(entry.breakdown?.weeklyRemainingPct, 0)}%`
                     : "—"
                 }

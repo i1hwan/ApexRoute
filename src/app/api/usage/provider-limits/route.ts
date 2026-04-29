@@ -92,10 +92,10 @@ function isInactive(c: ConnectionRow): boolean {
 
 function checkEligibility(c: ConnectionRow, strategy: string): RoutingPreviewEntry | null {
   if (isInactive(c)) return makeExcludedEntry(strategy, "inactive");
-  if (c.rateLimitedUntil != null && isAccountUnavailable(c.rateLimitedUntil as never)) {
+  if (c.rateLimitedUntil != null && isAccountUnavailable(c.rateLimitedUntil)) {
     return makeExcludedEntry(strategy, "rate_limited");
   }
-  if (isTerminalConnectionStatus(c as Parameters<typeof isTerminalConnectionStatus>[0])) {
+  if (isTerminalConnectionStatus(c)) {
     return makeExcludedEntry(strategy, "terminal");
   }
   return null;
@@ -125,7 +125,21 @@ export function computeRouting(
         }
         eligible.push(c);
       }
-      const scored = eligible.map((c) => scoreAccount(c));
+      const scored = eligible.map((c) => {
+        let normalizedRateLimitedUntil: string | null;
+        if (typeof c.rateLimitedUntil === "number" && Number.isFinite(c.rateLimitedUntil)) {
+          normalizedRateLimitedUntil = new Date(c.rateLimitedUntil).toISOString();
+        } else if (typeof c.rateLimitedUntil === "string") {
+          normalizedRateLimitedUntil = c.rateLimitedUntil;
+        } else {
+          normalizedRateLimitedUntil = null;
+        }
+        return scoreAccount({
+          ...c,
+          isActive: c.isActive === false || c.isActive === 0 ? false : undefined,
+          rateLimitedUntil: normalizedRateLimitedUntil,
+        });
+      });
       const usable = scored.filter((s) => !s.excluded).sort(candidateComparator);
       usable.forEach((s, i) => {
         map[s.conn.id] = toEntry(s, strategy, i + 1);
@@ -190,7 +204,7 @@ async function buildResponseBody(extra: Record<string, unknown> = {}) {
   const configuredStrategy = normalizeConfiguredStrategy(
     (settings as { fallbackStrategy?: string | null }).fallbackStrategy
   );
-  const connections = (await getProviderConnections({})) as ConnectionRow[];
+  const connections = (await getProviderConnections({})) as unknown as ConnectionRow[];
   const routing = computeRouting(connections, configuredStrategy);
 
   return mergeIntoResponseBody(extra, {
