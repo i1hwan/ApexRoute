@@ -10,7 +10,6 @@
   "include": [],
   "files": [
     "src/app/api/settings/proxy/test/route.ts",
-    "src/app/api/usage/provider-limits/route.ts",
     "src/lib/db/apiKeys.ts",
     "src/lib/db/cliToolState.ts",
     "src/lib/db/encryption.ts",
