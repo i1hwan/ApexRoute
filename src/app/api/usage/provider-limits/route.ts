@@ -14,9 +14,12 @@ import {
 import { scoreAccount, candidateComparator } from "@/sse/services/strategies/earliestResetFirst";
 import { isTerminalConnectionStatus } from "@/sse/services/accountTerminalStatus";
 import { isAccountUnavailable } from "@omniroute/open-sse/services/accountFallback";
+import { USAGE_SUPPORTED_PROVIDERS } from "@/shared/constants/providers";
 import type { RoutingPreviewEntry, RoutingPreviewMap } from "@/shared/contracts/routingPreview";
 
 export type { RoutingPreviewEntry, RoutingPreviewMap } from "@/shared/contracts/routingPreview";
+
+const SUPPORTED_PROVIDER_SET = new Set<string>(USAGE_SUPPORTED_PROVIDERS as readonly string[]);
 
 interface ConnectionRow {
   id: string;
@@ -106,6 +109,7 @@ export function computeRouting(
   const groups = new Map<string, ConnectionRow[]>();
   for (const c of connections) {
     if (!c || typeof c.id !== "string" || typeof c.provider !== "string") continue;
+    if (!SUPPORTED_PROVIDER_SET.has(c.provider)) continue;
     if (!groups.has(c.provider)) groups.set(c.provider, []);
     groups.get(c.provider)!.push(c);
   }

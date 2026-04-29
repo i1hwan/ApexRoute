@@ -197,6 +197,29 @@ test("computeRouting: skips entries without id or provider (defensive)", () => {
   assert.ok(out[`${prefix}-a`]);
 });
 
+test("computeRouting: skips connections whose provider is not in USAGE_SUPPORTED_PROVIDERS", () => {
+  const prefix = `usp-${Math.random().toString(36).slice(2, 8)}`;
+  setQuotaCache(`${prefix}-a`, "claude", {
+    session: { remainingPercentage: 80, resetAt: new Date(Date.now() + 60_000).toISOString() },
+    weekly: {
+      remainingPercentage: 50,
+      resetAt: new Date(Date.now() + 7 * 24 * 3600_000).toISOString(),
+    },
+  });
+  const conns = [
+    { id: `${prefix}-a`, provider: "claude", isActive: true },
+    { id: `${prefix}-qoder`, provider: "qoder", isActive: true },
+    { id: `${prefix}-pollinations`, provider: "pollinations", isActive: true },
+    { id: `${prefix}-nonexistent`, provider: "totally-fake-provider", isActive: true },
+  ];
+  const out = computeRouting(conns, "earliest-reset-first");
+  assert.equal(Object.keys(out).length, 1, "only the supported claude entry remains");
+  assert.ok(out[`${prefix}-a`]);
+  assert.equal(out[`${prefix}-qoder`], undefined);
+  assert.equal(out[`${prefix}-pollinations`], undefined);
+  assert.equal(out[`${prefix}-nonexistent`], undefined);
+});
+
 test("mergeIntoResponseBody: authoritative base.caches wins over extra.caches (Copilot PR #25 review)", () => {
   const partialSyncResult = {
     caches: { "conn-a": { quotas: {}, plan: null, fetchedAt: "ts", source: "manual" } },
