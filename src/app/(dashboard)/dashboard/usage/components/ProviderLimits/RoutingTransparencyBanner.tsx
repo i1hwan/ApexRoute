@@ -50,18 +50,21 @@ function collectNextPerProvider(
 
   const out: NextEntryByProvider[] = [];
   for (const [provider, group] of groups) {
-    if (group.length < 2) continue;
+    if (group.length === 0) continue;
     const providerLabel = providerConfig[provider]?.label ?? provider;
     let nextConn: ConnectionLite | null = null;
     let nonExcludedCount = 0;
+    let excludedCount = 0;
     for (const conn of group) {
       const entry = routing[conn.id];
       if (!entry) continue;
-      if (!entry.excluded) nonExcludedCount += 1;
+      if (entry.excluded) excludedCount += 1;
+      else nonExcludedCount += 1;
       if (entry.isNext) {
         nextConn = conn;
       }
     }
+    const hasAnyEntry = nonExcludedCount + excludedCount > 0;
     out.push({
       providerLabel,
       accountName: nextConn
@@ -72,7 +75,7 @@ function collectNextPerProvider(
             )
           )
         : null,
-      allExcluded: nonExcludedCount === 0,
+      allExcluded: hasAnyEntry && nonExcludedCount === 0,
       nextConnId: nextConn?.id ?? null,
     });
   }
