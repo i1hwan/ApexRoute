@@ -30,13 +30,18 @@ function expectedPressure(Q, sec, W) {
 }
 
 // Pressure values from two calls computed via different live `Date.now()`
-// readings can differ by one floor() step in deltaSec(). Build an inclusive
-// [lo, hi] band that tolerates a 1-second drift in either direction so
-// CI hosts with slower clocks don't trip 1e-9 equality assertions.
+// readings can differ by one floor() step in deltaSec() in either direction
+// (the second call may see sec-1 OR sec+1 depending on which call happened
+// first relative to the millisecond rollover). Build an inclusive [lo, hi]
+// band that tolerates ±1 second of drift so CI hosts with slower clocks
+// don't trip 1e-9 equality assertions.
 function pressureDriftBand(Q, sec, W) {
-  const a = expectedPressure(Q, sec, W);
-  const b = expectedPressure(Q, sec - 1, W);
-  return [Math.min(a, b), Math.max(a, b)];
+  const candidates = [
+    expectedPressure(Q, sec - 1, W),
+    expectedPressure(Q, sec, W),
+    expectedPressure(Q, sec + 1, W),
+  ];
+  return [Math.min(...candidates), Math.max(...candidates)];
 }
 
 // True when `actual` is inside any of the per-track drift bands AFTER taking
