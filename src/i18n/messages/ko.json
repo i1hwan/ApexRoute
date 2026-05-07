@@ -2516,7 +2516,7 @@
     "routingScoreWeekly": "주간 잔여",
     "routingScoreSessionPoints": "세션 점수",
     "routingScoreWeeklyPoints": "주간 점수",
-    "routingScoreBase": "기본 점수 (평균)",
+    "routingScoreBase": "기본 점수 (최댓값)",
     "routingScorePenaltyError": "오류 페널티",
     "routingScorePenaltyBackoff": "백오프 페널티",
     "routingScorePenaltyDegraded": "성능 저하 페널티",

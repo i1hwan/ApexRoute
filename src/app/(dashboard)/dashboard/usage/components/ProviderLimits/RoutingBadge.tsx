@@ -34,6 +34,7 @@ function getExcludedI18nKey(reason: string | null): string {
     case "quota_exhausted_unknown_reset":
       return "routingPriorityExcludedQuota";
     default:
+      if (reason && reason.includes("<5%")) return "routingPriorityExcludedQuota";
       return "routingPriorityExcludedUnknown";
   }
 }

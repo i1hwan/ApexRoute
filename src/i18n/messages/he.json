@@ -2544,7 +2544,7 @@
     "routingScoreWeekly": "Weekly %",
     "routingScoreSessionPoints": "Session points",
     "routingScoreWeeklyPoints": "Weekly points",
-    "routingScoreBase": "Base score (avg)",
+    "routingScoreBase": "Base score (max)",
     "routingScorePenaltyError": "Error penalty",
     "routingScorePenaltyBackoff": "Backoff penalty",
     "routingScorePenaltyDegraded": "Degraded penalty",
