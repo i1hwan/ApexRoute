@@ -62,7 +62,32 @@ function getRemainingPct(q: QuotaItem | null): number | null {
   return null;
 }
 
-function MiniBar({ label, pct }: { label: string; pct: number | null }) {
+function formatCountdown(resetAt: string | null | undefined): string | null {
+  if (!resetAt) return null;
+  try {
+    const diff = new Date(resetAt).getTime() - Date.now();
+    if (!Number.isFinite(diff) || diff <= 0) return null;
+    const h = Math.floor(diff / 3600000);
+    const m = Math.floor((diff % 3600000) / 60000);
+    if (h >= 24) {
+      const d = Math.floor(h / 24);
+      return `${d}d ${h % 24}h`;
+    }
+    return `${h}h ${m}m`;
+  } catch {
+    return null;
+  }
+}
+
+function MiniBar({
+  label,
+  pct,
+  resetAt,
+}: {
+  label: string;
+  pct: number | null;
+  resetAt?: string | null;
+}) {
   if (pct === null) {
     return (
       <div className="flex items-center gap-2 text-[10px] text-text-muted opacity-60">
@@ -73,9 +98,13 @@ function MiniBar({ label, pct }: { label: string; pct: number | null }) {
   }
   const colors = getBarColor(pct);
   const clamped = Math.max(0, Math.min(100, pct));
+  const countdown = formatCountdown(resetAt);
   return (
     <div className="flex items-center gap-2 text-[10px]">
       <span className="w-14 shrink-0 text-text-muted">{label}</span>
+      {countdown ? (
+        <span className="shrink-0 font-mono text-text-muted whitespace-nowrap">⏱ {countdown}</span>
+      ) : null}
       <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: colors.bg }}>
         <div
           className="h-full rounded-full"
@@ -99,9 +128,17 @@ export default function QuotaVisualization({ quotas }: QuotaVisualizationProps) 
   if (!sessionQ && !weeklyQ) return null;
 
   return (
-    <div className="flex flex-col gap-1 min-w-[220px] mr-3 pr-3 border-r border-border/60">
-      <MiniBar label={t("sessionRemaining")} pct={getRemainingPct(sessionQ)} />
-      <MiniBar label={t("weeklyRemaining")} pct={getRemainingPct(weeklyQ)} />
+    <div className="flex flex-col gap-1 min-w-[260px] mr-3 pr-3 border-r border-border/60">
+      <MiniBar
+        label={t("sessionRemaining")}
+        pct={getRemainingPct(sessionQ)}
+        resetAt={sessionQ?.resetAt}
+      />
+      <MiniBar
+        label={t("weeklyRemaining")}
+        pct={getRemainingPct(weeklyQ)}
+        resetAt={weeklyQ?.resetAt}
+      />
     </div>
   );
 }

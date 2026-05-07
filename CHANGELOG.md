@@ -8,7 +8,7 @@
 
 ### ✨ Features
 
-- **Smart session affinity continuation:** v8 of the routing affinity logic. The 5-minute affinity window matches Anthropic's prompt cache TTL exactly (sliding refresh, librarian-confirmed). On top of the existing hard-exclusion gates, two heuristic break rules now protect against pathological "stay on a doomed account" cases:
+- **Smart session affinity continuation:** v8 of the routing affinity logic. The 5-minute affinity window matches the Anthropic OAuth lane's effective prompt cache TTL: clients can send `cache_control.ttl: "1h"` but the server downgrades to 5m on the OAuth path (observed in production responses; tracked upstream as [anthropics/claude-code#46829](https://github.com/anthropics/claude-code/issues/46829)), so 5 minutes is the maximum we can rely on for cache survival. On top of the existing hard-exclusion gates, two heuristic break rules now protect against pathological "stay on a doomed account" cases:
   - `affinity_break_low_quota`: bound's minimum known remaining percentage drops below 15% AND a usable alternative exists (Oracle bg_79458ad3: 5% hard-exclusion × 3 cushion).
   - `affinity_break_p1_too_urgent`: a usable alt scores ≥ 3× bound AND ≥ 250 absolute delta. The absolute delta neutralizes near-zero misfire (bound=20, alt=61 trips 3× alone but the 41-point urgency difference doesn't justify a cache write).
   - 60-second cooldown per-session prevents oscillation between two close-pressure accounts. Hard exclusions bypass cooldown.
@@ -18,6 +18,8 @@
 
 - **AutoRefreshControl design system alignment:** raw `<input type="checkbox">` replaced with `<Toggle>` from the shared design system. Raw `<select>` styled to match the rest of the dashboard (rounded `bg-surface` border, focus ring, custom chevron icon via `material-symbols-outlined`). Auto-refresh control now visually consistent with other dashboard toggles and selects.
 - **RoutingBadge tooltip portal escape:** tooltip rendering moved from in-place `position: absolute` to `createPortal(..., document.body)` with `position: fixed`. Tooltip now escapes overflow-hidden containers like the Provider Limits card and group rows. Coordinates derived from the badge's `getBoundingClientRect()` and clamped to the viewport (8px padding) on resize/scroll. Portal pattern matches the codebase's existing `providers/[id]/page.tsx` overlay.
+- **Reset countdown restored on Session/Weekly mini-bars:** PR #25 introduced dual mini-bars on the Provider Limits row that displayed only the percentage. The countdown that was previously visible on the per-model bars (e.g. `⏱ 0h 34m`) was inadvertently dropped for the overall Session/Weekly windows. `QuotaVisualization`'s `MiniBar` now renders the countdown next to the label, mirroring the per-model bar format.
+- **Terminal status guard in `scoreAccount`:** accounts with `testStatus` of `expired` / `banned` / `credits_exhausted` are now excluded at scoring time, not only inside `isAffinityValid`. Without this guard the fall-through path of `selectByEarliestResetFirst` could re-select a terminal connection if its cached quotas still looked healthy. Mirrors the `auth.ts` contract via the shared `isTerminalConnectionStatus` helper. Fixes a SA-7 CI flake where `selected.id === "bound"` instead of `"alt"`.
 
 ### 🌐 Internationalization
 

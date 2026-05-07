@@ -327,6 +327,28 @@ export function scoreAccount(conn: ConnectionLike): ScoredCandidate {
   const s = scoreSessionTrack(conn.id);
   const w = scoreWeeklyTrack(conn.id);
 
+  // Terminal connection statuses (banned / expired / credits_exhausted) must
+  // be excluded regardless of cached quota state. Without this guard a stale
+  // quota snapshot would let a banned/expired account stay eligible in the
+  // fall-through path of selectByEarliestResetFirst (isAffinityValid already
+  // rejects terminal for the bound branch). Mirrors the auth.ts contract.
+  if (isTerminalConnectionStatus(conn)) {
+    return {
+      conn,
+      excluded: true,
+      reason: "terminal",
+      resetAt: null,
+      breakdown: {
+        s,
+        w,
+        P_error: 0,
+        P_backoff: 0,
+        degraded_pen: 0,
+        baseScore: 0,
+      },
+    };
+  }
+
   if (s.kind === "excluded" || w.kind === "excluded") {
     const ex = s.kind === "excluded" ? s : (w as TrackExcluded);
     return {
