@@ -2617,6 +2617,8 @@
     "autoRefreshInterval10m": "10m",
     "sessionRemaining": "Session remaining",
     "weeklyRemaining": "Weekly remaining",
+    "sessionQuotaLabel": "Session",
+    "weeklyQuotaLabel": "Weekly",
     "loadingQuotas": "Loading...",
     "account": "Account",
     "modelQuotas": "Model Quotas",

@@ -1,5 +1,6 @@
 "use client";
 
+import { Fragment } from "react";
 import { useTranslations } from "next-intl";
 import { calculatePercentage, formatCountdown } from "./utils";
 import { getBarColor } from "./quotaColors";
@@ -28,7 +29,12 @@ export function isOverallWindowName(name: string | null | undefined): boolean {
   if (!name) return false;
   const lower = name.toLowerCase();
   if (lower === "session" || lower === "weekly") return true;
-  return lower.startsWith("session (") || lower.startsWith("weekly (");
+  return (
+    lower.startsWith("session (") ||
+    lower.startsWith("weekly (") ||
+    lower.startsWith("session(") ||
+    lower.startsWith("weekly(")
+  );
 }
 
 export function pickWindow(quotas: QuotaItem[], windowKey: string): QuotaItem | null {
@@ -60,7 +66,7 @@ function getRemainingPct(q: QuotaItem | null): number | null {
   return null;
 }
 
-function MiniBar({
+export function OverallQuotaRow({
   label,
   pct,
   resetAt,
@@ -71,9 +77,12 @@ function MiniBar({
 }) {
   if (pct === null) {
     return (
-      <div className="flex items-center gap-2 text-[10px] text-text-muted opacity-60">
-        <span className="w-14 shrink-0">{label}</span>
-        <span>—</span>
+      <div className="flex items-center gap-1.5 min-w-[200px] shrink-0 opacity-60">
+        <span className="text-[11px] font-semibold py-0.5 px-2 rounded whitespace-nowrap min-w-[60px] text-center bg-bg-subtle text-text-muted">
+          {label}
+        </span>
+        <div className="flex-1 h-1.5 rounded-sm bg-black/[0.06] dark:bg-white/[0.06] min-w-[60px]" />
+        <span className="text-[11px] font-semibold min-w-[32px] text-right text-text-muted">—</span>
       </div>
     );
   }
@@ -81,18 +90,26 @@ function MiniBar({
   const clamped = Math.max(0, Math.min(100, pct));
   const countdown = formatCountdown(resetAt);
   return (
-    <div className="flex items-center gap-2 text-[10px]">
-      <span className="w-14 shrink-0 text-text-muted">{label}</span>
+    <div className="flex items-center gap-1.5 min-w-[200px] shrink-0">
+      <span
+        className="text-[11px] font-semibold py-0.5 px-2 rounded whitespace-nowrap min-w-[60px] text-center"
+        style={{ background: colors.bg, color: colors.text }}
+      >
+        {label}
+      </span>
       {countdown ? (
-        <span className="shrink-0 font-mono text-text-muted whitespace-nowrap">⏱ {countdown}</span>
+        <span className="text-[10px] text-text-muted whitespace-nowrap">⏱ {countdown}</span>
       ) : null}
-      <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: colors.bg }}>
+      <div className="flex-1 h-1.5 rounded-sm bg-black/[0.06] dark:bg-white/[0.06] min-w-[60px] overflow-hidden">
         <div
-          className="h-full rounded-full"
+          className="h-full rounded-sm transition-[width] duration-300 ease-out"
           style={{ width: `${clamped}%`, background: colors.bar }}
         />
       </div>
-      <span className="w-9 text-right font-mono" style={{ color: colors.text }}>
+      <span
+        className="text-[11px] font-semibold min-w-[32px] text-right"
+        style={{ color: colors.text }}
+      >
         {Math.round(clamped)}%
       </span>
     </div>
@@ -108,18 +125,23 @@ export default function QuotaVisualization({ quotas }: QuotaVisualizationProps) 
 
   if (!sessionQ && !weeklyQ) return null;
 
+  // Always render both Session AND Weekly rows whenever either window exists,
+  // so the row pair stays visually paired across providers. The OverallQuotaRow
+  // pct=null branch handles absent-window cases with a muted em-dash placeholder
+  // that keeps the row vocabulary consistent with neighbours. (Oracle audit:
+  // ses_1fbb494e4ffe7BxOUFFzU8g6dm — defect C.)
   return (
-    <div className="flex flex-col gap-1 min-w-[260px] mr-3 pr-3 border-r border-border/60">
-      <MiniBar
-        label={t("sessionRemaining")}
+    <Fragment>
+      <OverallQuotaRow
+        label={t("sessionQuotaLabel")}
         pct={getRemainingPct(sessionQ)}
-        resetAt={sessionQ?.resetAt}
+        resetAt={sessionQ?.resetAt ?? null}
       />
-      <MiniBar
-        label={t("weeklyRemaining")}
+      <OverallQuotaRow
+        label={t("weeklyQuotaLabel")}
         pct={getRemainingPct(weeklyQ)}
-        resetAt={weeklyQ?.resetAt}
+        resetAt={weeklyQ?.resetAt ?? null}
       />
-    </div>
+    </Fragment>
   );
 }

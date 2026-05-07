@@ -2562,7 +2562,9 @@
     "autoRefreshInterval5m": "5m",
     "autoRefreshInterval10m": "10m",
     "sessionRemaining": "Session remaining",
-    "weeklyRemaining": "Weekly remaining"
+    "weeklyRemaining": "Weekly remaining",
+    "sessionQuotaLabel": "Session",
+    "weeklyQuotaLabel": "Weekly"
   },
   "modals": {
     "waitingAuth": "ממתין לאישור",

@@ -4,6 +4,27 @@
 
 ---
 
+## [3.8.6] — 2026-05-08
+
+### 🎨 Design Unification
+
+- **Provider Limits row: Session/Weekly mini-bars now share the per-model bar visual vocabulary.** PR #26 introduced the dual `Session remaining` / `Weekly remaining` mini-bars with a different shape than the per-model bars on the same row (plain muted text label vs colored pill, `font-mono` vs `font-semibold`, `rounded-full` vs `rounded-sm`, vertical stack vs horizontal row), so the row read as two disconnected groups. The new `OverallQuotaRow` renders the same `text-[11px] font-semibold py-0.5 px-2 rounded min-w-[60px] text-center` pill label, the same `text-[10px] text-text-muted ⏱ {countdown}` glyph, the same `h-1.5 rounded-sm` bar, and the same `text-[11px] font-semibold min-w-[32px] text-right` percentage as per-model bars. The outer mini-bar separator (`mr-3 pr-3 border-r`) and the per-model `border-l/pl-3/ml-1` (i>0) separators are removed; every quota row now sits as an equal `flex flex-wrap` peer separated only by gap spacing. New i18n keys `sessionQuotaLabel` / `weeklyQuotaLabel` (en: "Session" / "Weekly", ko: "세션" / "주간"); other 30 locales seeded with English fallback.
+- **`RoutingBadge` wrapper unified to a single `inline-flex items-center` span.** The previous structure wrapped `Badge` in two layers (`<span ref>` for tooltip anchoring + `<span tabIndex>` for the striped excluded background), which gave the excluded variant a different cross-axis baseline than tier badges in the same row. The two layers are now merged: the single wrapper carries `ref`, `tabIndex`, focus/hover handlers, ARIA, and the optional striped className. Tooltip portal geometry is preserved (`wrapperRef.getBoundingClientRect()` still measures the visible badge box).
+- **Header controls (`Refresh All`, Auto-refresh toggle, interval select) sized at `h-8` consistently.** The previous header mixed `px-3.5 py-1.5` (~33-34 px) on the button with `py-1` (~28 px) on the select, breaking the header rhythm. All three controls now use `inline-flex items-center h-8` so they share a stable baseline. Toggle remains `size="sm"` and is centered by the parent `items-center`.
+- **`RoutingTransparencyBanner` (Configured banner) aligned with `items-center` + explicit `leading-none` on icons.** The banner used `items-start` with `mt-0.5` on the route icon, and the inline dotted-underline button inherited only the parent's text size — both produced visible baseline mismatches across icons / text spans / inline buttons. The banner now uses `items-center leading-snug`, the route and info icons use `leading-none align-middle`, and the dotted button uses `align-baseline leading-snug`.
+
+### 📚 Internal Notes
+
+- **9 new tests** in `tests/unit/quota-visualization-design.test.mjs` lock the `OverallQuotaRow` markup contract (label pill className, countdown glyph, bar `h-1.5 rounded-sm`, percentage `font-semibold min-w-[32px]` without `font-mono`, null-pct muted placeholder, missing/past resetAt omitting countdown, pct clamping) and the `QuotaVisualization` integration (always-render-both rows, both-when-only-session, neither-when-only-per-model, no-space canonical form parity).
+- **2 new tests** in `tests/unit/quota-visualization-pickwindow.test.mjs` cover the `isOverallWindowName` no-space canonical match (`session(5h)` / `weekly(7d)`) and a cross-function parity invariant: every name `pickWindow` accepts must also be marked overall by `isOverallWindowName` (so the parent `!isOverallWindowName` filter never lets a picked overall row leak into per-model rendering).
+- Test count: 2852/2852 PASS (was 2841; +11 net).
+- **Oracle two-stage verification:**
+  - **Stage 1 (plan, `ses_1fbbfa2a5ffe6xzkdsplPMRSOp`)**: NEEDS_REVISION on 7 items — U1 root-cause re-traced (double wrapper, not striped padding); F2 layout decision unified (flatten + remove all separators); F3 sizing corrected (h-8, not h-9); i18n strategy switched to English fallback; F4 strengthened with explicit line-height; new test deferred → required; F5 path corrected (className on single wrapper, not Badge `style` prop). All 7 revisions applied in plan v2 before implementation.
+  - **Stage 2 (implementation, `ses_1fbb494e4ffe7BxOUFFzU8g6dm`)**: NEEDS_REVISION on 2 real defects + 1 minor — defect B: `pickWindow` accepted `weekly(7d)` no-space form but `isOverallWindowName` did not, so `weekly(7d)` would double-render (once as overall mini-bar, once as a per-model bar). Defect C: `QuotaVisualization` conditionally rendered each row based on its own existence, dropping the missing-window placeholder that the old `MiniBar` always rendered. Minor I: CHANGELOG mentioned `align-middle` while the code did not have it. All three resolved in this commit; the 2 new pickwindow tests + 4 new QuotaVisualization integration tests guard against regression.
+- The deprecated `sessionRemaining` / `weeklyRemaining` i18n keys are retained in 32 locales for backwards compatibility with any external caller; cleanup is out of scope for this PR.
+
+---
+
 ## [3.8.5] — 2026-05-08
 
 ### 🐛 Bug Fixes

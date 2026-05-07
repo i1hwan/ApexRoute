@@ -136,15 +136,15 @@ export default function AutoRefreshControl({ onTrigger }: AutoRefreshControlProp
   };
 
   return (
-    <div className="flex items-center gap-3">
+    <div className="inline-flex items-center gap-3 h-8">
       <Toggle size="sm" checked={enabled} onChange={handleToggle} label={t("autoRefreshLabel")} />
-      <div className="relative inline-flex">
+      <div className="relative inline-flex h-8">
         <select
           value={intervalMs}
           onChange={(e) => handleIntervalChange(parseInt(e.target.value, 10))}
           disabled={!enabled}
           aria-label={t("autoRefreshIntervalLabel")}
-          className="appearance-none py-1 pl-2.5 pr-7 text-[12px] text-text-main bg-surface border border-black/10 dark:border-white/10 rounded-md focus:ring-1 focus:ring-primary/30 focus:border-primary/50 focus:outline-none transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+          className="appearance-none h-8 pl-2.5 pr-7 text-[12px] text-text-main bg-surface border border-black/10 dark:border-white/10 rounded-md focus:ring-1 focus:ring-primary/30 focus:border-primary/50 focus:outline-none transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
         >
           {INTERVAL_OPTIONS_MS.map((ms) => (
             <option key={ms} value={ms} className="bg-surface text-text-main">

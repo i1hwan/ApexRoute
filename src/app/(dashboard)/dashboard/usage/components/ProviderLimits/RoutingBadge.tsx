@@ -244,17 +244,17 @@ export default function RoutingBadge({ entry }: RoutingBadgeProps) {
   return (
     <span
       ref={wrapperRef}
-      className="relative inline-flex"
+      tabIndex={0}
+      aria-describedby={open ? tooltipId : undefined}
       onMouseEnter={show}
       onMouseLeave={hide}
       onFocus={show}
       onBlur={hide}
+      className={`relative inline-flex items-center ${wrapperClass}`}
     >
-      <span tabIndex={0} className={wrapperClass} aria-describedby={open ? tooltipId : undefined}>
-        <Badge variant={variant} size="sm" dot className="h-5 leading-none">
-          {label}
-        </Badge>
-      </span>
+      <Badge variant={variant} size="sm" dot className="h-5 leading-none">
+        {label}
+      </Badge>
       {mounted && tooltipNode && typeof document !== "undefined"
         ? createPortal(tooltipNode, document.body)
         : null}

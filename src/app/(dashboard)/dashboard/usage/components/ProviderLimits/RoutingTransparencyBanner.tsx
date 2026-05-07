@@ -110,8 +110,13 @@ export default function RoutingTransparencyBanner({
   const nextEntries = isERF ? collectNextPerProvider(routing, connections, providerConfig) : [];
 
   return (
-    <div className="flex items-start gap-2 px-3 py-2 rounded-lg border border-border bg-bg-subtle text-[12px] text-text-muted">
-      <span className="material-symbols-outlined text-[14px] mt-0.5 opacity-70">route</span>
+    <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-bg-subtle text-[12px] text-text-muted leading-snug">
+      <span
+        aria-hidden="true"
+        className="material-symbols-outlined text-[14px] leading-none align-middle opacity-70 shrink-0"
+      >
+        route
+      </span>
       <div className="flex-1 min-w-0">
         <span className="font-medium text-text-main">
           {t("transparencyBannerStrategy", { strategy: configuredStrategy })}
@@ -132,7 +137,7 @@ export default function RoutingTransparencyBanner({
                   <button
                     type="button"
                     onClick={() => scrollToConnection(e.nextConnId)}
-                    className="underline decoration-dotted underline-offset-2 hover:text-text-main cursor-pointer bg-transparent border-0 p-0 m-0 text-inherit"
+                    className="underline decoration-dotted underline-offset-2 hover:text-text-main cursor-pointer bg-transparent border-0 p-0 m-0 text-inherit align-baseline leading-snug"
                   >
                     {e.providerLabel} <span className="opacity-70">({e.accountName ?? "—"})</span>
                   </button>
@@ -148,7 +153,7 @@ export default function RoutingTransparencyBanner({
       </div>
       <span
         title={t("transparencyBannerDisclaimer")}
-        className="material-symbols-outlined text-[14px] opacity-60 cursor-help shrink-0"
+        className="material-symbols-outlined text-[14px] leading-none align-middle opacity-60 cursor-help shrink-0"
         aria-label={t("transparencyBannerDisclaimer")}
       >
         info

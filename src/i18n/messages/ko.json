@@ -2535,6 +2535,8 @@
     "autoRefreshInterval10m": "10분",
     "sessionRemaining": "세션 잔여",
     "weeklyRemaining": "주간 잔여",
+    "sessionQuotaLabel": "세션",
+    "weeklyQuotaLabel": "주간",
     "loadingQuotas": "로드 중...",
     "account": "계정",
     "modelQuotas": "모델 할당량",
