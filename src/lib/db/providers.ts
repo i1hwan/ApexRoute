@@ -64,6 +64,33 @@ export async function getProviderConnectionById(id: string) {
   return row ? decryptConnectionFields(cleanNulls(rowToCamel(row))) : null;
 }
 
+export interface ProviderConnectionMetadata {
+  id: string;
+  provider: string | null;
+  name: string | null;
+  displayName: string | null;
+  email: string | null;
+}
+
+export async function listProviderConnectionMetadata(): Promise<ProviderConnectionMetadata[]> {
+  const db = getDbInstance() as unknown as DbLike;
+  const rows = db
+    .prepare<JsonRecord>(
+      "SELECT id, provider, name, display_name, email FROM provider_connections ORDER BY priority ASC, updated_at DESC"
+    )
+    .all();
+  return rows.map((r) => {
+    const camel = cleanNulls(rowToCamel(r)) as Record<string, unknown>;
+    return {
+      id: String(camel.id ?? ""),
+      provider: typeof camel.provider === "string" ? camel.provider : null,
+      name: typeof camel.name === "string" ? camel.name : null,
+      displayName: typeof camel.displayName === "string" ? camel.displayName : null,
+      email: typeof camel.email === "string" ? camel.email : null,
+    };
+  });
+}
+
 export async function createProviderConnection(data: JsonRecord) {
   const db = getDbInstance() as unknown as DbLike;
   const now = new Date().toISOString();

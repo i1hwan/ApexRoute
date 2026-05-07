@@ -4,6 +4,28 @@
 
 ---
 
+## [3.8.3] — 2026-05-08
+
+### 🔒 Security
+
+- **`/api/sessions` no longer decrypts credential fields:** the new `listProviderConnectionMetadata()` helper selects only `id, provider, name, display_name, email` from `provider_connections`, so `apiKey` / `accessToken` / `refreshToken` / `idToken` are never read into memory for this endpoint. Eliminates the unnecessary decryption surface introduced in 3.8.2 (Copilot review #11).
+
+### 🐛 Bug Fixes
+
+- **`heuristicBreakHistory` map now bounded by both age and hard size cap:** previous implementation only evicted entries older than 10 minutes, so >1000 distinct sessions inside the cooldown window could grow the map without bound. New eviction runs age-based pruning on every break, then a size-cap loop removes the oldest entries via Map insertion order until size ≤ 1000 (Copilot review #1/#6).
+- **`isAffinityValid` reuses precomputed bound score:** previously called `scoreAccount(conn)` again inside the heuristic-break #2 path, contradicting the "score upfront once" intent of `selectByEarliestResetFirst`. Now finds the bound entry in `scoredAlternatives` and reuses its score (Copilot review #2/#7).
+- **RoutingBadge tooltip flips below the badge near the top of the viewport:** `updateCoords` measures available space above the badge against `TOOLTIP_HEIGHT_ESTIMATE_PX + gap + viewport padding`; when insufficient, sets `flip: true`, anchors `top` to `r.bottom + gap`, and switches `transform` from `translateY(-100%)` to `translateY(0)`. Mirrors the providers/[id]/page.tsx overlay behavior (Copilot review #3/#8).
+- **`TOOLTIP_WIDTH_ESTIMATE_PX` aligned with rendered min outer width:** raised from 240 to 244 to match `min-w-[220px]` plus `px-3` (12 px each side). Eliminates the 4 px right/left overflow on narrow viewports (Copilot review #9).
+
+### 📚 Internal Notes
+
+- **New unit tests for `/api/sessions`** (`tests/unit/api-sessions-route.test.mjs`): success-path enrichment with explicit secret-leak guard, orphan connectionId fallback, simulated DB failure fallback. Closes the missing test gap noted in Copilot review #5.
+- SA-5/6 test description corrected to match actual behavior (re-test in same tick is strictly inside the 60s cooldown window; "30s later" wording removed). Closes Copilot review #4.
+- `RoutingBadge` SSR comment rewritten to describe the actual `typeof window` inline check and the eslint `react-hooks/set-state-in-effect` rule that blocks the useState+useEffect mounted pattern (Copilot review #10).
+- Test count: 2833/2833 PASS (was 2830; +3 new `/api/sessions` route tests).
+
+---
+
 ## [3.8.2] — 2026-05-08
 
 ### ✨ Features

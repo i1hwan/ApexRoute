@@ -18,9 +18,11 @@ const TOOLTIP_CLOSE_DELAY_MS = 80;
 // Tooltip portal rendering constants. Matches the codebase's only other
 // portal pattern (providers/[id]/page.tsx) — z-index 10040 sits above
 // dashboard chrome so the tooltip can escape any overflow-hidden ancestor.
-// Width estimate covers the BreakdownRow layout (min-w-[220px] + padding).
+// Width estimate matches the actual rendered min outer width: BreakdownRow
+// has min-w-[220px] + 12px horizontal padding on each side (px-3) = 244.
 const TOOLTIP_Z_INDEX = 10040;
-const TOOLTIP_WIDTH_ESTIMATE_PX = 240;
+const TOOLTIP_WIDTH_ESTIMATE_PX = 244;
+const TOOLTIP_HEIGHT_ESTIMATE_PX = 240;
 const TOOLTIP_VIEWPORT_PADDING_PX = 8;
 const TOOLTIP_GAP_PX = 8;
 
@@ -52,12 +54,13 @@ function getExcludedI18nKey(reason: string | null): string {
 export default function RoutingBadge({ entry }: RoutingBadgeProps) {
   const t = useTranslations("usage");
   const [open, setOpen] = useState(false);
-  // SSR guard: portal target (document.body) is unavailable during the server
-  // render. Initialize from window presence so we hydrate without a flicker.
-  // No effect-driven flip needed — `useState` initializer runs lazily per
-  // render context (server vs client).
+  // SSR guard: portal target (document.body) is unavailable on the server.
+  // Plain `typeof window` check evaluates to false during SSR and true after
+  // hydration on the client, gating createPortal() without an effect-driven
+  // mount flip. eslint react-hooks/set-state-in-effect blocks the
+  // useState+useEffect mounted pattern, so the inline check is intentional.
   const mounted = typeof window !== "undefined";
-  const [coords, setCoords] = useState<{ left: number; top: number } | null>(null);
+  const [coords, setCoords] = useState<{ left: number; top: number; flip: boolean } | null>(null);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wrapperRef = useRef<HTMLSpanElement>(null);
   const tooltipId = useId();
@@ -86,8 +89,15 @@ export default function RoutingBadge({ entry }: RoutingBadgeProps) {
         idealLeft
       )
     );
-    const top = r.top - TOOLTIP_GAP_PX;
-    setCoords({ left, top });
+    // Vertical flip: when there isn't enough space above the badge for the
+    // tooltip + gap + viewport padding, render it below the badge instead.
+    // Mirrors the providers/[id]/page.tsx overlay flip behavior so badges
+    // near the top of the viewport don't render off-screen.
+    const spaceAbove = r.top;
+    const spaceNeeded = TOOLTIP_HEIGHT_ESTIMATE_PX + TOOLTIP_GAP_PX + TOOLTIP_VIEWPORT_PADDING_PX;
+    const flip = spaceAbove < spaceNeeded;
+    const top = flip ? r.bottom + TOOLTIP_GAP_PX : r.top - TOOLTIP_GAP_PX;
+    setCoords({ left, top, flip });
   }, []);
 
   useLayoutEffect(() => {
@@ -136,7 +146,7 @@ export default function RoutingBadge({ entry }: RoutingBadgeProps) {
           position: "fixed",
           left: coords.left,
           top: coords.top,
-          transform: "translateY(-100%)",
+          transform: coords.flip ? "translateY(0)" : "translateY(-100%)",
           zIndex: TOOLTIP_Z_INDEX,
         }}
         className="px-3 py-2 text-[11px] text-white bg-gray-900/95 rounded-md shadow-lg pointer-events-none border border-white/10 min-w-[220px] whitespace-pre-line"

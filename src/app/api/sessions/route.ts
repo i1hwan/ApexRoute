@@ -4,7 +4,10 @@ import {
   getActiveSessionCount,
   getAllActiveSessionCountsByKey,
 } from "@omniroute/open-sse/services/sessionManager.ts";
-import { getProviderConnections } from "@/lib/db/providers";
+import {
+  listProviderConnectionMetadata,
+  type ProviderConnectionMetadata,
+} from "@/lib/db/providers";
 import { getAccountDisplayName } from "@/lib/display/names";
 
 export async function GET() {
@@ -13,12 +16,11 @@ export async function GET() {
     const count = getActiveSessionCount();
     const byApiKey = getAllActiveSessionCountsByKey();
 
-    let connMap: Map<string, Record<string, unknown>> = new Map();
+    let connMap: Map<string, ProviderConnectionMetadata> = new Map();
     try {
-      const connections = await getProviderConnections();
+      const connections = await listProviderConnectionMetadata();
       for (const c of connections) {
-        const id = (c as Record<string, unknown>).id;
-        if (typeof id === "string") connMap.set(id, c as Record<string, unknown>);
+        if (c.id) connMap.set(c.id, c);
       }
     } catch {
       connMap = new Map();
@@ -30,13 +32,13 @@ export async function GET() {
         ...s,
         accountName: conn
           ? getAccountDisplayName({
-              id: conn.id as string | undefined,
-              name: conn.name as string | undefined,
-              displayName: conn.displayName as string | undefined,
-              email: conn.email as string | undefined,
+              id: conn.id,
+              name: conn.name ?? undefined,
+              displayName: conn.displayName ?? undefined,
+              email: conn.email ?? undefined,
             })
           : null,
-        provider: conn ? ((conn.provider as string | undefined) ?? null) : null,
+        provider: conn?.provider ?? null,
       };
     });
 

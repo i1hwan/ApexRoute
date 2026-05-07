@@ -457,8 +457,10 @@ export function candidateComparator(a: ScoredCandidate, b: ScoredCandidate): num
 }
 
 // Per-session timestamp of the most recent heuristic affinity break.
-// In-memory only; bounded GC at 1000 entries / 10 minutes to prevent
-// unbounded growth in long-running processes. See plan v8 §5 anti-regression.
+// In-memory only; bounded by BOTH age (10 min) AND hard size cap (1000) to
+// guarantee bounded memory even if the process sees >1000 distinct sessions
+// inside the cooldown window. Map preserves insertion order, so the oldest
+// entries are evicted first when the size cap kicks in. Copilot PR #26 review.
 const heuristicBreakHistory = new Map<string, number>();
 const HEURISTIC_BREAK_GC_MAX_ENTRIES = 1000;
 const HEURISTIC_BREAK_GC_MAX_AGE_MS = 10 * 60 * 1000;
@@ -472,12 +474,20 @@ function isHeuristicBreakInCooldown(sessionId: string | null): boolean {
 
 function recordHeuristicBreak(sessionId: string | null): void {
   if (!sessionId) return;
+  // Re-set deletes + re-inserts so the entry moves to the end of the
+  // insertion-ordered Map. Matters for the hard-size eviction below.
+  heuristicBreakHistory.delete(sessionId);
   heuristicBreakHistory.set(sessionId, Date.now());
-  if (heuristicBreakHistory.size > HEURISTIC_BREAK_GC_MAX_ENTRIES) {
-    const cutoff = Date.now() - HEURISTIC_BREAK_GC_MAX_AGE_MS;
-    for (const [sid, ts] of heuristicBreakHistory) {
-      if (ts < cutoff) heuristicBreakHistory.delete(sid);
-    }
+
+  const cutoff = Date.now() - HEURISTIC_BREAK_GC_MAX_AGE_MS;
+  for (const [sid, ts] of heuristicBreakHistory) {
+    if (ts < cutoff) heuristicBreakHistory.delete(sid);
+  }
+
+  while (heuristicBreakHistory.size > HEURISTIC_BREAK_GC_MAX_ENTRIES) {
+    const oldestKey = heuristicBreakHistory.keys().next().value;
+    if (oldestKey === undefined) break;
+    heuristicBreakHistory.delete(oldestKey);
   }
 }
 
@@ -551,8 +561,11 @@ export function isAffinityValid(
     // Heuristic break #2: a usable alt is so much more urgent that one cache
     // write is cheaper than 5 more minutes of suboptimal routing. Combine
     // multiplicative factor with absolute delta to neutralize misfire near zero.
-    const boundScored = scoreAccount(conn);
-    const boundScore = boundScored.score ?? 0;
+    // Reuse the precomputed bound score from scoredAlternatives instead of
+    // re-running scoreAccount(conn) — which would re-read quota cache and
+    // contradict the "score upfront once" intent in selectByEarliestResetFirst.
+    const boundScored = scoredAlternatives.find((sc) => sc.conn.id === conn.id);
+    const boundScore = boundScored?.score ?? 0;
     const bestAltScore = Math.max(...usable.map((sc) => sc.score ?? 0));
 
     let isHeavyGap: boolean;

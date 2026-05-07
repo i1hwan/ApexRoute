@@ -1007,11 +1007,8 @@ test("SA-4: bound 10% session + NO usable alt → keep affinity (Oracle edge rul
   assert.equal(result.selected.id, "bound", "no usable alt → stay even with low Q");
 });
 
-test("SA-5/6: cooldown 60s — break, then 30s later same condition → no break (cooldown)", () => {
-  // Use a fresh sessionId per test run so previous SA-3 break doesn't pollute.
+test("SA-5/6: cooldown — first low-Q break records cooldown; re-test within window suppresses break", () => {
   const sessionId = `sa-5-session-${Math.random().toString(36).slice(2)}`;
-  // alt score must be strictly higher than bound's so the post-break sort
-  // is deterministic (avoids near-tie flakiness when both score ≈ 80).
   seedClaudeAccount("bound", {
     sessionRem: 10,
     sessionResetSec: W_SESSION_SEC,
@@ -1026,12 +1023,13 @@ test("SA-5/6: cooldown 60s — break, then 30s later same condition → no break
   });
   touchSession(sessionId, "bound");
 
-  // First call: cooldown empty → break
   const r1 = selectByEarliestResetFirst([claudeConn("bound"), claudeConn("alt")], sessionId);
   assert.equal(r1.selected.id, "alt", "first break: low quota");
 
-  // Re-bind to bound and immediately re-test: cooldown active → keep affinity
-  // even though bound is still 10%
+  // Re-bind to bound and re-test in the same tick. Real wall-clock has
+  // advanced only a fraction of a millisecond between r1 and r2 — that is
+  // strictly inside the 60s cooldown window, so the heuristic break must
+  // be suppressed even though bound is still at 10%.
   touchSession(sessionId, "bound");
   const r2 = selectByEarliestResetFirst([claudeConn("bound"), claudeConn("alt")], sessionId);
   assert.equal(r2.selected.id, "bound", "cooldown active: heuristic break suppressed");
