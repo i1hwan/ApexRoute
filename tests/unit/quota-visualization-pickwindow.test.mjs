@@ -16,10 +16,12 @@ test("isOverallWindowName matches canonical session/weekly labels with or withou
 
 test("isOverallWindowName matches no-space canonical forms (parity with pickWindow)", () => {
   // Oracle audit (ses_1fbb494e4ffe7BxOUFFzU8g6dm — defect B): pickWindow accepts
-  // both "weekly (7d)" and "weekly(7d)" via startsWith("windowKey(") at line 47,
-  // so isOverallWindowName MUST accept the same no-space canonical forms or the
+  // both "weekly (7d)" and "weekly(7d)" via startsWith(`${windowKey}(`), so
+  // isOverallWindowName MUST accept the same no-space canonical forms or the
   // parent !isOverallWindowName filter in index.tsx will let "weekly(7d)" leak
-  // into per-model rendering AND OverallQuotaRow simultaneously.
+  // into per-model rendering AND OverallQuotaRow simultaneously. The parity
+  // invariant itself is enforced by the dedicated cross-function test below,
+  // independent of any specific implementation line.
   assert.equal(isOverallWindowName("session(5h)"), true);
   assert.equal(isOverallWindowName("weekly(7d)"), true);
   assert.equal(isOverallWindowName("Session(5h)"), true);

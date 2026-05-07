@@ -22,6 +22,18 @@ function renderWithI18n(node) {
 
 const FUTURE_RESET = new Date(Date.now() + 5 * 60 * 60 * 1000).toISOString();
 
+// Assert each Tailwind class appears in the rendered HTML independently, so
+// harmless refactors (class reordering, additions of equivalent classes) do
+// not break these tests. The brittle full-string match used to fail whenever
+// Tailwind's JIT or a className helper changed the class order.
+function assertHasClasses(html, classes, context) {
+  for (const cls of classes) {
+    const escaped = cls.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const pattern = new RegExp(`(?:^|[\\s"])${escaped}(?:[\\s"]|$)`);
+    assert.match(html, pattern, `${context}: expected class "${cls}" in rendered HTML`);
+  }
+}
+
 test("OverallQuotaRow renders the unified per-model bar shape (label pill + countdown + bar + %)", () => {
   const html = renderToStaticMarkup(
     React.createElement(OverallQuotaRow, {
@@ -31,19 +43,28 @@ test("OverallQuotaRow renders the unified per-model bar shape (label pill + coun
     })
   );
 
-  assert.match(
+  assertHasClasses(
     html,
-    /class="text-\[11px\] font-semibold py-0\.5 px-2 rounded whitespace-nowrap min-w-\[60px\] text-center"/,
-    "label pill must use the per-model bar className signature"
+    [
+      "text-[11px]",
+      "font-semibold",
+      "py-0.5",
+      "px-2",
+      "rounded",
+      "whitespace-nowrap",
+      "min-w-[60px]",
+      "text-center",
+    ],
+    "label pill"
   );
   assert.match(html, />Session</, "label text must appear inside the pill");
   assert.match(html, /⏱ /, "countdown clock glyph must be rendered when resetAt is in the future");
-  assert.match(html, /h-1\.5 rounded-sm/, "bar must use h-1.5 rounded-sm matching per-model bar");
+  assertHasClasses(html, ["h-1.5", "rounded-sm"], "bar track");
   assert.equal(/rounded-full/.test(html), false, "OverallQuotaRow must NOT use rounded-full");
-  assert.match(
+  assertHasClasses(
     html,
-    /text-\[11px\] font-semibold min-w-\[32px\] text-right/,
-    "percentage span must use per-model bar className signature"
+    ["text-[11px]", "font-semibold", "min-w-[32px]", "text-right"],
+    "percentage span"
   );
   assert.equal(/font-mono/.test(html), false, "percentage must NOT use font-mono");
   assert.match(html, />75%</, "percentage value must be rounded and rendered");
@@ -54,14 +75,18 @@ test("OverallQuotaRow with pct=null renders muted placeholder using the same row
     React.createElement(OverallQuotaRow, { label: "Weekly", pct: null })
   );
 
-  assert.match(
+  assertHasClasses(
     html,
-    /flex items-center gap-1\.5 min-w-\[200px\] shrink-0 opacity-60/,
-    "null-pct placeholder must keep the per-model row shape with opacity-60"
+    ["flex", "items-center", "gap-1.5", "min-w-[200px]", "shrink-0", "opacity-60"],
+    "null-pct row container"
   );
-  assert.match(html, /text-\[11px\] font-semibold py-0\.5 px-2 rounded/);
+  assertHasClasses(
+    html,
+    ["text-[11px]", "font-semibold", "py-0.5", "px-2", "rounded"],
+    "null-pct label pill"
+  );
   assert.match(html, />Weekly</);
-  assert.match(html, /h-1\.5 rounded-sm bg-black\/\[0\.06\]/);
+  assertHasClasses(html, ["h-1.5", "rounded-sm", "bg-black/[0.06]"], "null-pct bar track");
   assert.match(html, />—</);
 });
 
