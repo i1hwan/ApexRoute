@@ -4,6 +4,23 @@
 
 ---
 
+## [3.8.1] — 2026-05-07
+
+### 🐛 Bug Fixes
+
+- **Routing Strategy v7 — burn-rate pressure max replaces v6 mean:** v6 combined session and weekly track scores via arithmetic mean, which dilutes the more-urgent track's signal with the calmer track. Production observation: `APEXATGNU(33%/0h34m, 91%/6d17h)` was picked over `GNUMAX(29%/1h54m, 63%/1d1h)` even though GNUMAX's weekly was about to waste 63% in ~1 day. v7 introduces `pressure(Q, t, W) = Q × clamp(W/t, 1, URGENCY_CAP)` per track and combines via `Math.max(...)`. Two windows are independent ledgers (verified via anthropics/claude-code issues #54750, #52135, #40513), so routing to the more perishable signal matches the user's "burn what's about to expire" intent.
+- **Penalty rebalance:** `PENALTY_BACKOFF_WEIGHT` 100 → 101 to keep a max-backoff paid account strictly below self-hosted score=0 (previously could tie at 0 and resolve only via lex tie-break).
+
+### 📚 Internal Notes
+
+- `sessionTimePoints` / `weeklyTimePoints` retained as `@deprecated` for diagnostic UIs and external callers; v7 scoring path uses `pressure()` directly.
+- All v6 invariants preserved: F1 (self-hosted score=0 fallback), F2 (per-model weekly windows ignored), F3 (Q=100 with null resetAt → max urgency), F4 (multiplicative scoring + penalty layer).
+- Unit tests: 2821/2821 PASS. Score absolute-value assertions recomputed using returned `track.secondsToReset` (not seeded value) to eliminate `deltaSec()` floor flakiness.
+- `api-usage-provider-limits.test.mjs:132` mean assertion flipped to max.
+- `routing-strategy-v6.md` marked `status: superseded`. Plan: `.sisyphus/plans/routing-strategy-v7.md` (Oracle APPROVED, Momus reviewed v1→v4 with all blockers fixed).
+
+---
+
 ## [3.8.0] — 2026-04-28
 
 ### ✨ Features

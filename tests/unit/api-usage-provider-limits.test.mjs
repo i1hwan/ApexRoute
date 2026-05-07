@@ -129,7 +129,7 @@ test("computeRouting (ERF): groups by provider; ranks are independent per provid
   assert.equal(out[`${prefix}-glm-a`].isNext, true);
 });
 
-test("computeRouting (ERF): breakdown.baseScore equals avg(known track scores) per earliestResetFirst.ts:331", () => {
+test("computeRouting (ERF): breakdown.baseScore equals max(known track scores) per earliestResetFirst.ts scoreAccount", () => {
   const prefix = `erf-break-${Math.random().toString(36).slice(2, 8)}`;
   freshSetup(prefix);
   const conns = [{ id: `${prefix}-a`, provider: "claude", isActive: true }];
@@ -138,14 +138,11 @@ test("computeRouting (ERF): breakdown.baseScore equals avg(known track scores) p
   assert.ok(entry.breakdown, "breakdown present");
   const sp = entry.breakdown.sessionPoints;
   const wp = entry.breakdown.weeklyPoints;
-  // baseScore = trackScores.reduce((a,b) => a+b, 0) / trackScores.length
-  // where each trackScore is the points value (NOT pct-weighted).
-  // See gateway/src/sse/services/strategies/earliestResetFirst.ts line 331.
   const trackScores = [];
   if (sp != null) trackScores.push(sp);
   if (wp != null) trackScores.push(wp);
   if (trackScores.length > 0) {
-    const expectedBase = trackScores.reduce((a, b) => a + b, 0) / trackScores.length;
+    const expectedBase = Math.max(...trackScores);
     const actualBase = entry.breakdown.baseScore;
     assert.ok(
       typeof actualBase === "number" && Number.isFinite(actualBase),
@@ -153,7 +150,7 @@ test("computeRouting (ERF): breakdown.baseScore equals avg(known track scores) p
     );
     assert.ok(
       Math.abs(actualBase - expectedBase) < 1e-9,
-      `baseScore ${actualBase} should equal avg(${trackScores.join(",")}) = ${expectedBase}`
+      `baseScore ${actualBase} should equal max(${trackScores.join(",")}) = ${expectedBase}`
     );
   } else {
     assert.equal(entry.breakdown.baseScore, 0, "baseScore is 0 when no track has a score");
