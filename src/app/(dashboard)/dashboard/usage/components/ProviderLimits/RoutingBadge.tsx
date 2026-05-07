@@ -108,7 +108,6 @@ export default function RoutingBadge({ entry }: RoutingBadgeProps) {
     return () => {
       window.removeEventListener("resize", updateCoords);
       window.removeEventListener("scroll", updateCoords, true);
-      setCoords(null);
     };
   }, [open, updateCoords]);
 

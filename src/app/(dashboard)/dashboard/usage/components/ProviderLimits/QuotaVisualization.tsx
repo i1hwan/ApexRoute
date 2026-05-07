@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { calculatePercentage } from "./utils";
+import { calculatePercentage, formatCountdown } from "./utils";
 import { getBarColor } from "./quotaColors";
 
 interface QuotaItem {
@@ -60,23 +60,6 @@ function getRemainingPct(q: QuotaItem | null): number | null {
     return calculatePercentage(q.used, q.total);
   }
   return null;
-}
-
-function formatCountdown(resetAt: string | null | undefined): string | null {
-  if (!resetAt) return null;
-  try {
-    const diff = new Date(resetAt).getTime() - Date.now();
-    if (!Number.isFinite(diff) || diff <= 0) return null;
-    const h = Math.floor(diff / 3600000);
-    const m = Math.floor((diff % 3600000) / 60000);
-    if (h >= 24) {
-      const d = Math.floor(h / 24);
-      return `${d}d ${h % 24}h`;
-    }
-    return `${h}h ${m}m`;
-  } catch {
-    return null;
-  }
 }
 
 function MiniBar({

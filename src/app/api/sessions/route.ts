@@ -16,14 +16,24 @@ export async function GET() {
     const count = getActiveSessionCount();
     const byApiKey = getAllActiveSessionCountsByKey();
 
+    const sessionConnectionIds = Array.from(
+      new Set(
+        sessions
+          .map((s) => s.connectionId)
+          .filter((id): id is string => typeof id === "string" && id.length > 0)
+      )
+    );
+
     let connMap: Map<string, ProviderConnectionMetadata> = new Map();
-    try {
-      const connections = await listProviderConnectionMetadata();
-      for (const c of connections) {
-        if (c.id) connMap.set(c.id, c);
+    if (sessionConnectionIds.length > 0) {
+      try {
+        const connections = await listProviderConnectionMetadata(sessionConnectionIds);
+        for (const c of connections) {
+          if (c.id) connMap.set(c.id, c);
+        }
+      } catch {
+        connMap = new Map();
       }
-    } catch {
-      connMap = new Map();
     }
 
     const enrichedSessions = sessions.map((s) => {

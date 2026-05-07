@@ -4,6 +4,25 @@
 
 ---
 
+## [3.8.4] — 2026-05-08
+
+### 🐛 Bug Fixes
+
+- **`/api/sessions` only fetches metadata for active session connectionIds:** previously `listProviderConnectionMetadata()` did a full-table scan on every request. Now the route collects the distinct `connectionId`s from `getActiveSessions()`, short-circuits to no DB call when there are none, and otherwise issues a single `WHERE id IN (?, ?, ...)` with bound parameters. Endpoint work is now proportional to active sessions, not total provider connections (Copilot review #NEW-3).
+- **`RoutingBadge` `useLayoutEffect` cleanup no longer calls `setCoords(null)`:** rendering is already gated by `open && coords`, so the cleanup state update was unnecessary and risked extra renders / strict-mode noise. The cleanup now only removes the resize/scroll listeners (Copilot review #NEW-1).
+
+### ♻️ Refactor
+
+- **`formatCountdown` extracted to `ProviderLimits/utils.tsx`:** the helper was previously duplicated in `ProviderLimits/index.tsx` and `QuotaVisualization.tsx`, raising the risk of countdown formatting drift between per-model bars and Session/Weekly mini-bars. The shared helper preserves both prior behaviors (`<24h` → `${h}h ${m}m`, `>=24h` → `${d}d ${h}h`, invalid/past → `null`) and now accepts `string | number | Date | null | undefined` (Copilot review #NEW-2).
+
+### 📚 Internal Notes
+
+- **`listProviderConnectionMetadata(ids?: string[])`:** new optional filter parameter. Empty array short-circuits to `[]`. Non-empty array deduplicates via `Array.from(new Set(...))` and binds via prepared-statement placeholders (SQL-injection safe). `undefined` preserves the legacy "all rows" behavior for any other caller.
+- **2 new unit tests** in `tests/unit/api-sessions-route.test.mjs`: (1) no active sessions → no `provider_connections` query at all; (2) two sessions on the same `connectionId` collapse to a single bound parameter, and unrelated accounts' secrets/emails never appear in the response. Test count: 2835/2835 PASS (was 2833; +2 net).
+- **Oracle pre-commit verification (`ses_1fc62b147ffeUtgRRb2uvBKS4x`):** APPROVED all 3 fixes with high confidence. Confirmed no regression risk for the cleanup removal (no stale-frame race because `useLayoutEffect` runs synchronously before paint), no behavioral drift in the shared `formatCountdown`, and no SQL-injection or orphan-id concern in the scoped lookup.
+
+---
+
 ## [3.8.3] — 2026-05-08
 
 ### 🔒 Security

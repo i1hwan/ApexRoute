@@ -72,13 +72,31 @@ export interface ProviderConnectionMetadata {
   email: string | null;
 }
 
-export async function listProviderConnectionMetadata(): Promise<ProviderConnectionMetadata[]> {
+export async function listProviderConnectionMetadata(
+  ids?: string[] | null
+): Promise<ProviderConnectionMetadata[]> {
+  if (Array.isArray(ids) && ids.length === 0) return [];
+
   const db = getDbInstance() as unknown as DbLike;
-  const rows = db
-    .prepare<JsonRecord>(
-      "SELECT id, provider, name, display_name, email FROM provider_connections ORDER BY priority ASC, updated_at DESC"
-    )
-    .all();
+  let rows: unknown[];
+
+  if (Array.isArray(ids) && ids.length > 0) {
+    const uniqueIds = Array.from(new Set(ids.filter((id) => typeof id === "string" && id)));
+    if (uniqueIds.length === 0) return [];
+    const placeholders = uniqueIds.map(() => "?").join(",");
+    rows = db
+      .prepare<JsonRecord>(
+        `SELECT id, provider, name, display_name, email FROM provider_connections WHERE id IN (${placeholders})`
+      )
+      .all(...uniqueIds);
+  } else {
+    rows = db
+      .prepare<JsonRecord>(
+        "SELECT id, provider, name, display_name, email FROM provider_connections ORDER BY priority ASC, updated_at DESC"
+      )
+      .all();
+  }
+
   return rows.map((r) => {
     const camel = cleanNulls(rowToCamel(r)) as Record<string, unknown>;
     return {

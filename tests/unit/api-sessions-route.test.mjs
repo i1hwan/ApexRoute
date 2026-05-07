@@ -119,3 +119,100 @@ test("GET /api/sessions returns empty enrichment when DB lookup throws", async (
     db.prepare = originalPrepare;
   }
 });
+
+test("GET /api/sessions skips DB query when there are no active sessions", async () => {
+  const db = core.getDbInstance();
+  const originalPrepare = db.prepare.bind(db);
+  let providerConnectionsQueried = false;
+  db.prepare = (sql) => {
+    if (typeof sql === "string" && sql.includes("FROM provider_connections")) {
+      providerConnectionsQueried = true;
+    }
+    return originalPrepare(sql);
+  };
+
+  try {
+    const response = await sessionsRoute.GET();
+    const body = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(body.count, 0);
+    assert.equal(body.sessions.length, 0);
+    assert.equal(
+      providerConnectionsQueried,
+      false,
+      "no active sessions should mean no provider_connections query"
+    );
+  } finally {
+    db.prepare = originalPrepare;
+  }
+});
+
+test("GET /api/sessions queries metadata only for distinct active session connectionIds", async () => {
+  const conn1 = await providersDb.createProviderConnection({
+    provider: "claude",
+    name: "active-account",
+    displayName: "Active Account",
+    email: "active@example.com",
+    apiKey: "sk-active-secret",
+    isActive: true,
+    priority: 0,
+  });
+  await providersDb.createProviderConnection({
+    provider: "openai",
+    name: "unused-account",
+    displayName: "Unused Account",
+    email: "unused@example.com",
+    apiKey: "sk-unused-secret",
+    isActive: true,
+    priority: 1,
+  });
+
+  sessionManager.touchSession("session-active-a", conn1.id);
+  sessionManager.touchSession("session-active-b", conn1.id);
+
+  const db = core.getDbInstance();
+  const originalPrepare = db.prepare.bind(db);
+  const capturedSql = [];
+  db.prepare = (sql) => {
+    if (typeof sql === "string" && sql.includes("FROM provider_connections")) {
+      capturedSql.push(sql);
+    }
+    return originalPrepare(sql);
+  };
+
+  try {
+    const response = await sessionsRoute.GET();
+    const body = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(body.count, 2);
+
+    const enrichmentSqls = capturedSql.filter((sql) => sql.includes("WHERE id IN"));
+    assert.equal(
+      enrichmentSqls.length,
+      1,
+      "exactly one scoped enrichment query should run for the active session connectionIds"
+    );
+    const placeholderCount = (enrichmentSqls[0].match(/\?/g) || []).length;
+    assert.equal(
+      placeholderCount,
+      1,
+      "two sessions sharing one connectionId should collapse to a single bound parameter"
+    );
+
+    const serialized = JSON.stringify(body);
+    assert.equal(
+      serialized.includes("sk-unused-secret"),
+      false,
+      "unused account secret must never appear in the response"
+    );
+    assert.equal(
+      serialized.includes("unused@example.com"),
+      false,
+      "unused account metadata must not be fetched / leaked"
+    );
+  } finally {
+    db.prepare = originalPrepare;
+  }
+});
