@@ -29,6 +29,30 @@ function expectedPressure(Q, sec, W) {
   return Q * Math.max(URGENCY_FLOOR, Math.min(W / sec, URGENCY_CAP));
 }
 
+// Pressure values from two calls computed via different live `Date.now()`
+// readings can differ by one floor() step in deltaSec(). Build an inclusive
+// [lo, hi] band that tolerates a 1-second drift in either direction so
+// CI hosts with slower clocks don't trip 1e-9 equality assertions.
+function pressureDriftBand(Q, sec, W) {
+  const a = expectedPressure(Q, sec, W);
+  const b = expectedPressure(Q, sec - 1, W);
+  return [Math.min(a, b), Math.max(a, b)];
+}
+
+// True when `actual` is inside any of the per-track drift bands AFTER taking
+// the max() across tracks. Used for assertions on `scoreAccount(...).score`
+// where the test cannot read the exact secondsToReset the scorer used.
+function withinPressureMaxBand(actual, tracks) {
+  let lo = -Infinity;
+  let hi = -Infinity;
+  for (const [Q, sec, W] of tracks) {
+    const [tLo, tHi] = pressureDriftBand(Q, sec, W);
+    if (tLo > lo) lo = tLo;
+    if (tHi > hi) hi = tHi;
+  }
+  return actual >= lo - 1e-9 && actual <= hi + 1e-9;
+}
+
 const { setQuotaCache, markAccountExhaustedFrom429 } = quotaCache;
 const { isTerminalConnectionStatus, normalizeStatus } = accountTerminalStatus;
 const { clearSessions, touchSession, generateSessionId } = sessionManager;
@@ -263,7 +287,10 @@ test("github-style account with no session window scores from weekly only", () =
 
   const result = scoreAccount(claudeConn("ghacct"));
   assert.equal(result.excluded, false);
-  assert.ok(Math.abs(result.score - expectedW) < 1e-9, "single track: max([w.score]) = w.score");
+  assert.ok(
+    withinPressureMaxBand(result.score, [[80, w.secondsToReset, W_WEEKLY_SEC]]),
+    `single track: result.score=${result.score} should be in pressure drift band`
+  );
 });
 
 // ─── 5. F1: no_quota_data fallback (self-hosted / openai-compatible) ─────────
@@ -347,11 +374,13 @@ test("F2-2: weekly Omelette=0% (would have hard-excluded in v4) does NOT exclude
   assert.equal(result.excluded, false, "v6/v7 ignores per-model windows entirely");
   const s = scoreSessionTrack("apex");
   const w = scoreWeeklyTrack("apex");
-  const expected = Math.max(
-    expectedPressure(50, s.secondsToReset, W_SESSION_SEC),
-    expectedPressure(50, w.secondsToReset, W_WEEKLY_SEC)
+  assert.ok(
+    withinPressureMaxBand(result.score, [
+      [50, s.secondsToReset, W_SESSION_SEC],
+      [50, w.secondsToReset, W_WEEKLY_SEC],
+    ]),
+    `v7 baseScore = max within drift band, got ${result.score}`
   );
-  assert.ok(Math.abs(result.score - expected) < 1e-9, `v7 baseScore = max, got ${result.score}`);
 });
 
 // ─── 7. F3: fresh quota (Q=100 AND resetAt=null) ─────────────────────────────
@@ -471,11 +500,12 @@ test("F4-3 (v7): low urgency abundant quota → max(pressure_session, pressure_w
   const result = scoreAccount(claudeConn("idle"));
   const s = scoreSessionTrack("idle");
   const w = scoreWeeklyTrack("idle");
-  const expected = Math.max(
-    expectedPressure(100, s.secondsToReset, W_SESSION_SEC),
-    expectedPressure(100, w.secondsToReset, W_WEEKLY_SEC)
+  assert.ok(
+    withinPressureMaxBand(result.score, [
+      [100, s.secondsToReset, W_SESSION_SEC],
+      [100, w.secondsToReset, W_WEEKLY_SEC],
+    ])
   );
-  assert.ok(Math.abs(result.score - expected) < 1e-9);
 });
 
 test("F4-4 (v7): Q boundary at exactly 5 → known (NOT excluded), score = pressure(5, sec, W)", () => {
