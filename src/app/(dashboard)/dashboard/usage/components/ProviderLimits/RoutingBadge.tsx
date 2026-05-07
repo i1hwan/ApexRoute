@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useId } from "react";
 import { useTranslations } from "next-intl";
 import Badge from "@/shared/components/Badge";
 import type { RoutingPreviewEntry } from "@/shared/contracts/routingPreview";
@@ -43,6 +43,7 @@ export default function RoutingBadge({ entry }: RoutingBadgeProps) {
   const t = useTranslations("usage");
   const [open, setOpen] = useState(false);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tooltipId = useId();
 
   const show = useCallback(() => {
     if (closeTimerRef.current) {
@@ -90,13 +91,14 @@ export default function RoutingBadge({ entry }: RoutingBadgeProps) {
       onFocus={show}
       onBlur={hide}
     >
-      <span tabIndex={0} className={wrapperClass}>
+      <span tabIndex={0} className={wrapperClass} aria-describedby={open ? tooltipId : undefined}>
         <Badge variant={variant} size="sm" dot className="h-5 leading-none">
           {label}
         </Badge>
       </span>
       {open && (
         <span
+          id={tooltipId}
           role="tooltip"
           className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 text-[11px] text-white bg-gray-900/95 rounded-md shadow-lg pointer-events-none border border-white/10 min-w-[220px] whitespace-pre-line"
         >

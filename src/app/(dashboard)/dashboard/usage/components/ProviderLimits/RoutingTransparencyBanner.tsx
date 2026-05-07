@@ -84,7 +84,16 @@ function collectNextPerProvider(
 
 function scrollToConnection(connectionId: string | null) {
   if (!connectionId || typeof document === "undefined") return;
-  const el = document.querySelector(`[data-connection-id="${connectionId}"]`);
+  const escaped =
+    typeof CSS !== "undefined" && typeof CSS.escape === "function"
+      ? CSS.escape(connectionId)
+      : connectionId.replace(/["\\]/g, "\\$&");
+  let el: Element | null = null;
+  try {
+    el = document.querySelector(`[data-connection-id="${escaped}"]`);
+  } catch {
+    return;
+  }
   if (el && "scrollIntoView" in el) {
     (el as HTMLElement).scrollIntoView({ behavior: "smooth", block: "start" });
   }

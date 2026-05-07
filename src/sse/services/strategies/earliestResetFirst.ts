@@ -135,15 +135,20 @@ export const URGENCY_FLOOR = 1;
  * to normal). NOT a literal "expected wasted percentage" — a routing urgency
  * signal calibrated to keep score upper bound at 10000 and lower bound ≥ Q.
  *
- *   t = null            → fresh quota OR unknown timer (Q=100 dominates).
- *   t ≤ 0               → stale / past reset; saturated to URGENCY_CAP.
+ *   t = null OR non-finite (e.g. Number.POSITIVE_INFINITY)
+ *                       → fresh quota OR unknown timer; max urgency = Q×CAP.
+ *                         scoreSessionTrack/scoreWeeklyTrack only emits this
+ *                         path when Q=100 (F3 fresh-quota branch), so this
+ *                         conservatively over-prioritizes ambiguous timers.
+ *   t ≤ 0               → stale / past reset; saturated to Q×URGENCY_CAP.
  *                         (Defensive — quotaCache.ts:276-283 nullifies expired
  *                         resetAt before scoring, so this branch is unreachable
  *                         via normal cache state today; retained for direct
  *                         callers and regression safety.)
- *   t > W               → multiplier floor URGENCY_FLOOR=1.
+ *   0 < t ≤ W/CAP       → multiplier saturated at URGENCY_CAP (very urgent).
  *   W/CAP < t ≤ W       → multiplier = W/t ∈ (1, CAP].
- *   t ≤ W/CAP           → multiplier saturated at URGENCY_CAP.
+ *   t > W               → multiplier floored at URGENCY_FLOOR=1, so
+ *                         pressure = Q (lower bound).
  *   Q < MIN_USABLE_REMAINING_PCT → returns -Infinity (defensive; in practice
  *                         scoreSession/WeeklyTrack already returns kind:"excluded").
  */
