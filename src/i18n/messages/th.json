@@ -2491,6 +2491,7 @@
     "age": "อายุ",
     "requests": "คำขอ",
     "connection": "การเชื่อมต่อ",
+    "connectionFallback": "Account #{id}",
     "durationMillisecondsShort": "{value}ms",
     "durationSecondsShort": "{value}วินาที",
     "durationMinutesShort": "{value}ม",

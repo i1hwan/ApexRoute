@@ -2573,6 +2573,7 @@
     "age": "Age",
     "requests": "Requests",
     "connection": "Connection",
+    "connectionFallback": "Account #{id}",
     "durationMillisecondsShort": "{value}ms",
     "durationSecondsShort": "{value}s",
     "durationMinutesShort": "{value}m",

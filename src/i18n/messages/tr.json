@@ -2491,6 +2491,7 @@
     "age": "Süre",
     "requests": "İstekler",
     "connection": "Bağlantı",
+    "connectionFallback": "Account #{id}",
     "durationMillisecondsShort": "{value}ms",
     "durationSecondsShort": "{value}s",
     "durationMinutesShort": "{value}m",

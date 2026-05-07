@@ -2491,6 +2491,7 @@
     "age": "Ålder",
     "requests": "Förfrågningar",
     "connection": "Anslutning",
+    "connectionFallback": "Account #{id}",
     "durationMillisecondsShort": "{value}ms",
     "durationSecondsShort": "{value}s",
     "durationMinutesShort": "{value}m",

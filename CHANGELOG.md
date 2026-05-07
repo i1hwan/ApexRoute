@@ -4,6 +4,92 @@
 
 ---
 
+## [3.8.5] — 2026-05-08
+
+### 🐛 Bug Fixes
+
+- **`QuotaVisualization.pickWindow` no longer absorbs per-model quotas:** the previous "Pass 2" fallback matched any name starting with `weekly ` / `session `, so a connection that only reported `weekly Sonnet (7d)` (no canonical `weekly` row) could populate the overall mini-bar AND render as its own per-model bar simultaneously. The fallback is removed; only exact `session` / `weekly` and parenthesised forms (`session (5h)`, `weekly (7d)`) match. Regression test in `tests/unit/quota-visualization-pickwindow.test.mjs` (Oracle audit on PR #26 round 4).
+- **`RoutingBadge` tooltip now visible on short viewports:** the previous fix flipped vertically when the space above was insufficient, but never clamped the tooltip into the viewport, so very short viewports (or tooltip taller than `viewH - 2*padding`) still rendered partially off-screen. The new placement (1) prefers the side with more room (mirroring the providers/[id]/page.tsx overlay rule), (2) clamps the on-screen top using a transform-aware formula (above-anchored uses `translateY(-100%)`, so we require `top >= tooltipHeight + padding`), and (3) caps the rendered element with `maxHeight: calc(100vh - 16px)` + `overflow: hidden` so a tooltip larger than the viewport degrades to a clipped frame instead of off-screen content (Copilot review #R4-1, Oracle audit on PR #26 round 4).
+- **`isAffinityValid` no longer silently degrades when bound is missing from `scoredAlternatives`:** the previous code defaulted `boundScore` to `0` when `find()` returned `undefined`, which would let any positive alt trip the urgent-break rule. The function now returns `{ valid: true }` (keep affinity) on missing-bound rather than breaking on a missing signal. Production `selectByEarliestResetFirst` always includes the bound entry, so this is a future-caller footgun guard. New test SA-11.
+
+### 📚 Internal Notes
+
+- `/api/sessions` metadata-lookup catch now logs a sanitized warning (`[sessions] connection metadata lookup failed for N ids: <message>`) instead of swallowing the error silently. Operationally weak silent fallback was a Copilot review nit and an Oracle audit nit.
+- 6 new unit tests: 5 in `tests/unit/quota-visualization-pickwindow.test.mjs` covering the regression and 1 in `tests/unit/auth-strategy-earliest-reset-first.test.mjs` (SA-11). Test count: 2841/2841 PASS (was 2835; +6 net).
+- **Oracle pre-commit verification (`ses_1fc4cce1bffePsARTIZ6x3AxlY`):** initially returned NEEDS_REVISION with two real defects: `pickWindow` Pass 2 absorbing per-model quotas, and the R4-1 plan failing on viewports shorter than the tooltip height estimate. Both are fixed in this commit; the two NITs (footgun guard, sanitized log) are addressed alongside.
+
+---
+
+## [3.8.4] — 2026-05-08
+
+### 🐛 Bug Fixes
+
+- **`/api/sessions` only fetches metadata for active session connectionIds:** previously `listProviderConnectionMetadata()` did a full-table scan on every request. Now the route collects the distinct `connectionId`s from `getActiveSessions()`, short-circuits to no DB call when there are none, and otherwise issues a single `WHERE id IN (?, ?, ...)` with bound parameters. Endpoint work is now proportional to active sessions, not total provider connections (Copilot review #NEW-3).
+- **`RoutingBadge` `useLayoutEffect` cleanup no longer calls `setCoords(null)`:** rendering is already gated by `open && coords`, so the cleanup state update was unnecessary and risked extra renders / strict-mode noise. The cleanup now only removes the resize/scroll listeners (Copilot review #NEW-1).
+
+### ♻️ Refactor
+
+- **`formatCountdown` extracted to `ProviderLimits/utils.tsx`:** the helper was previously duplicated in `ProviderLimits/index.tsx` and `QuotaVisualization.tsx`, raising the risk of countdown formatting drift between per-model bars and Session/Weekly mini-bars. The shared helper preserves both prior behaviors (`<24h` → `${h}h ${m}m`, `>=24h` → `${d}d ${h}h`, invalid/past → `null`) and now accepts `string | number | Date | null | undefined` (Copilot review #NEW-2).
+
+### 📚 Internal Notes
+
+- **`listProviderConnectionMetadata(ids?: string[])`:** new optional filter parameter. Empty array short-circuits to `[]`. Non-empty array deduplicates via `Array.from(new Set(...))` and binds via prepared-statement placeholders (SQL-injection safe). `undefined` preserves the legacy "all rows" behavior for any other caller.
+- **2 new unit tests** in `tests/unit/api-sessions-route.test.mjs`: (1) no active sessions → no `provider_connections` query at all; (2) two sessions on the same `connectionId` collapse to a single bound parameter, and unrelated accounts' secrets/emails never appear in the response. Test count: 2835/2835 PASS (was 2833; +2 net).
+- **Oracle pre-commit verification (`ses_1fc62b147ffeUtgRRb2uvBKS4x`):** APPROVED all 3 fixes with high confidence. Confirmed no regression risk for the cleanup removal (no stale-frame race because `useLayoutEffect` runs synchronously before paint), no behavioral drift in the shared `formatCountdown`, and no SQL-injection or orphan-id concern in the scoped lookup.
+
+---
+
+## [3.8.3] — 2026-05-08
+
+### 🔒 Security
+
+- **`/api/sessions` no longer decrypts credential fields:** the new `listProviderConnectionMetadata()` helper selects only `id, provider, name, display_name, email` from `provider_connections`, so `apiKey` / `accessToken` / `refreshToken` / `idToken` are never read into memory for this endpoint. Eliminates the unnecessary decryption surface introduced in 3.8.2 (Copilot review #11).
+
+### 🐛 Bug Fixes
+
+- **`heuristicBreakHistory` map now bounded by both age and hard size cap:** previous implementation only evicted entries older than 10 minutes, so >1000 distinct sessions inside the cooldown window could grow the map without bound. New eviction runs age-based pruning on every break, then a size-cap loop removes the oldest entries via Map insertion order until size ≤ 1000 (Copilot review #1/#6).
+- **`isAffinityValid` reuses precomputed bound score:** previously called `scoreAccount(conn)` again inside the heuristic-break #2 path, contradicting the "score upfront once" intent of `selectByEarliestResetFirst`. Now finds the bound entry in `scoredAlternatives` and reuses its score (Copilot review #2/#7).
+- **RoutingBadge tooltip flips below the badge near the top of the viewport:** `updateCoords` measures available space above the badge against `TOOLTIP_HEIGHT_ESTIMATE_PX + gap + viewport padding`; when insufficient, sets `flip: true`, anchors `top` to `r.bottom + gap`, and switches `transform` from `translateY(-100%)` to `translateY(0)`. Mirrors the providers/[id]/page.tsx overlay behavior (Copilot review #3/#8).
+- **`TOOLTIP_WIDTH_ESTIMATE_PX` aligned with rendered min outer width:** raised from 240 to 244 to match `min-w-[220px]` plus `px-3` (12 px each side). Eliminates the 4 px right/left overflow on narrow viewports (Copilot review #9).
+
+### 📚 Internal Notes
+
+- **New unit tests for `/api/sessions`** (`tests/unit/api-sessions-route.test.mjs`): success-path enrichment with explicit secret-leak guard, orphan connectionId fallback, simulated DB failure fallback. Closes the missing test gap noted in Copilot review #5.
+- SA-5/6 test description corrected to match actual behavior (re-test in same tick is strictly inside the 60s cooldown window; "30s later" wording removed). Closes Copilot review #4.
+- `RoutingBadge` SSR comment rewritten to describe the actual `typeof window` inline check and the eslint `react-hooks/set-state-in-effect` rule that blocks the useState+useEffect mounted pattern (Copilot review #10).
+- Test count: 2833/2833 PASS (was 2830; +3 new `/api/sessions` route tests).
+
+---
+
+## [3.8.2] — 2026-05-08
+
+### ✨ Features
+
+- **Smart session affinity continuation:** v8 of the routing affinity logic. The 5-minute affinity window matches the Anthropic OAuth lane's effective prompt cache TTL: clients can send `cache_control.ttl: "1h"` but the server downgrades to 5m on the OAuth path (observed in production responses; tracked upstream as [anthropics/claude-code#46829](https://github.com/anthropics/claude-code/issues/46829)), so 5 minutes is the maximum we can rely on for cache survival. On top of the existing hard-exclusion gates, two heuristic break rules now protect against pathological "stay on a doomed account" cases:
+  - `affinity_break_low_quota`: bound's minimum known remaining percentage drops below 15% AND a usable alternative exists (Oracle bg_79458ad3: 5% hard-exclusion × 3 cushion).
+  - `affinity_break_p1_too_urgent`: a usable alt scores ≥ 3× bound AND ≥ 250 absolute delta. The absolute delta neutralizes near-zero misfire (bound=20, alt=61 trips 3× alone but the 41-point urgency difference doesn't justify a cache write).
+  - 60-second cooldown per-session prevents oscillation between two close-pressure accounts. Hard exclusions bypass cooldown.
+- **SessionsTab account name:** `/api/sessions` enriches each session with `accountName` (resolved via `getAccountDisplayName`) and `provider`. Active Sessions widget now shows the bound account label and provider tag instead of a truncated raw connection ID. Graceful degradation: provider connection lookup failures fall back to `Account #xxxxxx` without breaking the API.
+
+### 🐛 Bug Fixes
+
+- **AutoRefreshControl design system alignment:** raw `<input type="checkbox">` replaced with `<Toggle>` from the shared design system. Raw `<select>` styled to match the rest of the dashboard (rounded `bg-surface` border, focus ring, custom chevron icon via `material-symbols-outlined`). Auto-refresh control now visually consistent with other dashboard toggles and selects.
+- **RoutingBadge tooltip portal escape:** tooltip rendering moved from in-place `position: absolute` to `createPortal(..., document.body)` with `position: fixed`. Tooltip now escapes overflow-hidden containers like the Provider Limits card and group rows. Coordinates derived from the badge's `getBoundingClientRect()` and clamped to the viewport (8px padding) on resize/scroll. Portal pattern matches the codebase's existing `providers/[id]/page.tsx` overlay.
+- **Reset countdown restored on Session/Weekly mini-bars:** PR #25 introduced dual mini-bars on the Provider Limits row that displayed only the percentage. The countdown that was previously visible on the per-model bars (e.g. `⏱ 0h 34m`) was inadvertently dropped for the overall Session/Weekly windows. `QuotaVisualization`'s `MiniBar` now renders the countdown next to the label, mirroring the per-model bar format.
+- **Terminal status guard in `scoreAccount`:** accounts with `testStatus` of `expired` / `banned` / `credits_exhausted` are now excluded at scoring time, not only inside `isAffinityValid`. Without this guard the fall-through path of `selectByEarliestResetFirst` could re-select a terminal connection if its cached quotas still looked healthy. Mirrors the `auth.ts` contract via the shared `isTerminalConnectionStatus` helper. Fixes a SA-7 CI flake where `selected.id === "bound"` instead of `"alt"`.
+
+### 🌐 Internationalization
+
+- New `usage.connectionFallback` i18n key for SessionsTab account-name fallback. English and Korean hand-translated; 30 other locales seeded with `Account #{id}` placeholder.
+
+### 📚 Internal Notes
+
+- 10 new unit tests `SA-1`..`SA-10` cover smart affinity (low-quota break, urgent-alt break, cooldown, hard-exclusion bypass, no-alt edge, missing-track edge, backwards-compat third-arg). Test cooldown reset hook added to prevent cross-test pollution. Full test suite: 2830/2830 PASS (was 2821; +9 net).
+- Plan: `.sisyphus/plans/limits-dashboard-polish.md` (Oracle APPROVED with revisions, Momus v1→v2 OKAY).
+- `isAffinityValid` signature extended with optional `scoredAlternatives` parameter (backwards compatible). `selectByEarliestResetFirst` scores all candidates upfront and passes them to the affinity check, avoiding double scoring.
+
+---
+
 ## [3.8.1] — 2026-05-07
 
 ### 🐛 Bug Fixes

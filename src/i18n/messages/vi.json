@@ -2491,6 +2491,7 @@
     "age": "Tuổi",
     "requests": "Yêu cầu",
     "connection": "Kết nối",
+    "connectionFallback": "Account #{id}",
     "durationMillisecondsShort": "{value}ms",
     "durationSecondsShort": "{value}s",
     "durationMinutesShort": "{value} phút",

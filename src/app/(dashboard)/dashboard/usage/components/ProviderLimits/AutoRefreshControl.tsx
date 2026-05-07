@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
+import Toggle from "@/shared/components/Toggle";
 
 const LS_ENABLED = "omniroute:limits:autoRefresh:enabled";
 const LS_INTERVAL = "omniroute:limits:autoRefresh:intervalMs";
@@ -135,29 +136,29 @@ export default function AutoRefreshControl({ onTrigger }: AutoRefreshControlProp
   };
 
   return (
-    <div className="flex items-center gap-2 text-[12px]">
-      <label className="flex items-center gap-1.5 cursor-pointer select-none">
-        <input
-          type="checkbox"
-          checked={enabled}
-          onChange={(e) => handleToggle(e.target.checked)}
-          className="cursor-pointer"
-        />
-        <span className="text-text-muted">{t("autoRefreshLabel")}</span>
-      </label>
-      <select
-        value={intervalMs}
-        onChange={(e) => handleIntervalChange(parseInt(e.target.value, 10))}
-        disabled={!enabled}
-        aria-label={t("autoRefreshIntervalLabel")}
-        className="px-2 py-1 rounded border border-border bg-bg-subtle text-text-main text-[12px] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-      >
-        {INTERVAL_OPTIONS_MS.map((ms) => (
-          <option key={ms} value={ms}>
-            {t(intervalI18nKey(ms))}
-          </option>
-        ))}
-      </select>
+    <div className="flex items-center gap-3">
+      <Toggle size="sm" checked={enabled} onChange={handleToggle} label={t("autoRefreshLabel")} />
+      <div className="relative inline-flex">
+        <select
+          value={intervalMs}
+          onChange={(e) => handleIntervalChange(parseInt(e.target.value, 10))}
+          disabled={!enabled}
+          aria-label={t("autoRefreshIntervalLabel")}
+          className="appearance-none py-1 pl-2.5 pr-7 text-[12px] text-text-main bg-surface border border-black/10 dark:border-white/10 rounded-md focus:ring-1 focus:ring-primary/30 focus:border-primary/50 focus:outline-none transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+        >
+          {INTERVAL_OPTIONS_MS.map((ms) => (
+            <option key={ms} value={ms} className="bg-surface text-text-main">
+              {t(intervalI18nKey(ms))}
+            </option>
+          ))}
+        </select>
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-y-0 right-1.5 flex items-center text-text-muted"
+        >
+          <span className="material-symbols-outlined text-[16px]">expand_more</span>
+        </span>
+      </div>
     </div>
   );
 }

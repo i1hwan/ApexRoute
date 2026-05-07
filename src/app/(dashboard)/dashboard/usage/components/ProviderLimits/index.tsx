@@ -8,6 +8,7 @@ import {
   parseQuotaData,
   calculatePercentage,
   formatQuotaLabel,
+  formatCountdown,
   normalizePlanTier,
   resolvePlanValue,
 } from "./utils";
@@ -50,24 +51,6 @@ const TIER_FILTERS = [
   { key: "free", labelKey: "tierFree" },
   { key: "unknown", labelKey: "tierUnknown" },
 ];
-
-// Format countdown
-function formatCountdown(resetAt) {
-  if (!resetAt) return null;
-  try {
-    const diff = (new Date(resetAt) as any) - (new Date() as any);
-    if (diff <= 0) return null;
-    const h = Math.floor(diff / 3600000);
-    const m = Math.floor((diff % 3600000) / 60000);
-    if (h >= 24) {
-      const d = Math.floor(h / 24);
-      return `${d}d ${h % 24}h`;
-    }
-    return `${h}h ${m}m`;
-  } catch {
-    return null;
-  }
-}
 
 export default function ProviderLimits() {
   const t = useTranslations("usage");

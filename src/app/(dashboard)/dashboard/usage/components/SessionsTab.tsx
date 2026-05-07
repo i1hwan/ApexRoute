@@ -99,9 +99,17 @@ export default function SessionsTab() {
                   </td>
                   <td className="py-2.5 px-3">
                     {s.connectionId ? (
-                      <span className="text-xs font-mono text-cyan-400">
-                        {s.connectionId.slice(0, 10)}
-                      </span>
+                      <div className="flex flex-col">
+                        <span className="text-[12px] font-medium text-text-main truncate max-w-[180px]">
+                          {s.accountName ??
+                            t("connectionFallback", {
+                              id: s.connectionId.slice(0, 6),
+                            })}
+                        </span>
+                        {s.provider && (
+                          <span className="text-[10px] text-text-muted">{s.provider}</span>
+                        )}
+                      </div>
                     ) : (
                       <span className="text-text-muted/40">{t("notAvailableSymbol")}</span>
                     )}

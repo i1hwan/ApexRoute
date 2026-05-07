@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { calculatePercentage } from "./utils";
+import { calculatePercentage, formatCountdown } from "./utils";
 import { getBarColor } from "./quotaColors";
 
 interface QuotaItem {
@@ -31,21 +31,19 @@ export function isOverallWindowName(name: string | null | undefined): boolean {
   return lower.startsWith("session (") || lower.startsWith("weekly (");
 }
 
-function pickWindow(quotas: QuotaItem[], windowKey: string): QuotaItem | null {
-  // Pass 1: exact match or "<key> (..." parenthesised window. This catches
-  // canonical labels like "weekly (7d)" / "session (5h)" but NOT model-specific
-  // variants like "weekly Sonnet (7d)" — those have a space + word before "(".
+export function pickWindow(quotas: QuotaItem[], windowKey: string): QuotaItem | null {
+  // Match ONLY canonical overall windows: exact "session"/"weekly", or
+  // parenthesised window like "weekly (7d)" / "session (5h)". Per-model
+  // variants like "weekly Sonnet (7d)" have a space + word before the paren
+  // and must NEVER populate the overall mini-bar — they are rendered as
+  // their own per-model bar in index.tsx via the !isOverallWindowName filter.
+  // A previous "Pass 2" fallback that matched any name starting with
+  // "weekly " could pull in "weekly Sonnet" when no canonical row existed,
+  // double-rendering the per-model quota. Removed (Oracle audit on PR #26).
   for (const q of quotas) {
     const name = (q.name || "").toLowerCase();
     if (name === windowKey) return q;
     if (name.startsWith(`${windowKey} (`) || name.startsWith(`${windowKey}(`)) return q;
-  }
-  // Pass 2: fallback for legacy unparenthesised forms. Only reached when no
-  // canonical match exists, so per-model windows still cannot collide with
-  // the overall window when the overall window is present in the cache.
-  for (const q of quotas) {
-    const name = (q.name || "").toLowerCase();
-    if (name.startsWith(`${windowKey} `)) return q;
   }
   return null;
 }
@@ -62,7 +60,15 @@ function getRemainingPct(q: QuotaItem | null): number | null {
   return null;
 }
 
-function MiniBar({ label, pct }: { label: string; pct: number | null }) {
+function MiniBar({
+  label,
+  pct,
+  resetAt,
+}: {
+  label: string;
+  pct: number | null;
+  resetAt?: string | null;
+}) {
   if (pct === null) {
     return (
       <div className="flex items-center gap-2 text-[10px] text-text-muted opacity-60">
@@ -73,9 +79,13 @@ function MiniBar({ label, pct }: { label: string; pct: number | null }) {
   }
   const colors = getBarColor(pct);
   const clamped = Math.max(0, Math.min(100, pct));
+  const countdown = formatCountdown(resetAt);
   return (
     <div className="flex items-center gap-2 text-[10px]">
       <span className="w-14 shrink-0 text-text-muted">{label}</span>
+      {countdown ? (
+        <span className="shrink-0 font-mono text-text-muted whitespace-nowrap">⏱ {countdown}</span>
+      ) : null}
       <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: colors.bg }}>
         <div
           className="h-full rounded-full"
@@ -99,9 +109,17 @@ export default function QuotaVisualization({ quotas }: QuotaVisualizationProps) 
   if (!sessionQ && !weeklyQ) return null;
 
   return (
-    <div className="flex flex-col gap-1 min-w-[220px] mr-3 pr-3 border-r border-border/60">
-      <MiniBar label={t("sessionRemaining")} pct={getRemainingPct(sessionQ)} />
-      <MiniBar label={t("weeklyRemaining")} pct={getRemainingPct(weeklyQ)} />
+    <div className="flex flex-col gap-1 min-w-[260px] mr-3 pr-3 border-r border-border/60">
+      <MiniBar
+        label={t("sessionRemaining")}
+        pct={getRemainingPct(sessionQ)}
+        resetAt={sessionQ?.resetAt}
+      />
+      <MiniBar
+        label={t("weeklyRemaining")}
+        pct={getRemainingPct(weeklyQ)}
+        resetAt={weeklyQ?.resetAt}
+      />
     </div>
   );
 }

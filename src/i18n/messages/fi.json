@@ -2491,6 +2491,7 @@
     "age": "Ikä",
     "requests": "Pyynnöt",
     "connection": "Yhteys",
+    "connectionFallback": "Account #{id}",
     "durationMillisecondsShort": "{value}ms",
     "durationSecondsShort": "{value}s",
     "durationMinutesShort": "{value}m",

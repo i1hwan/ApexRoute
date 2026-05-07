@@ -2513,6 +2513,7 @@
     "age": "年龄",
     "requests": "请求",
     "connection": "连接方式",
+    "connectionFallback": "Account #{id}",
     "durationMillisecondsShort": "{value}ms",
     "durationSecondsShort": "{value}s",
     "durationMinutesShort": "{value}m",

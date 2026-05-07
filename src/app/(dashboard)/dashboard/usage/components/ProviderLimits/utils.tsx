@@ -84,7 +84,6 @@ export function formatResetTime(date) {
 
     const totalMinutes = Math.ceil(diffMs / (1000 * 60));
 
-    // < 60 minutes: show only minutes
     if (totalMinutes < 60) {
       return `${totalMinutes}m`;
     }
@@ -92,17 +91,39 @@ export function formatResetTime(date) {
     const totalHours = Math.floor(totalMinutes / 60);
     const remainingMinutes = totalMinutes % 60;
 
-    // < 24 hours: show hours and minutes
     if (totalHours < 24) {
       return `${totalHours}h ${remainingMinutes}m`;
     }
 
-    // >= 24 hours: show days, hours, and minutes
     const days = Math.floor(totalHours / 24);
     const remainingHours = totalHours % 24;
     return `${days}d ${remainingHours}h ${remainingMinutes}m`;
   } catch (error) {
     return "-";
+  }
+}
+
+export function formatCountdown(resetAt: string | number | Date | null | undefined): string | null {
+  if (!resetAt) return null;
+  try {
+    const targetMs =
+      resetAt instanceof Date
+        ? resetAt.getTime()
+        : typeof resetAt === "number"
+          ? resetAt
+          : new Date(resetAt).getTime();
+    if (!Number.isFinite(targetMs)) return null;
+    const diff = targetMs - Date.now();
+    if (diff <= 0) return null;
+    const h = Math.floor(diff / 3600000);
+    const m = Math.floor((diff % 3600000) / 60000);
+    if (h >= 24) {
+      const d = Math.floor(h / 24);
+      return `${d}d ${h % 24}h`;
+    }
+    return `${h}h ${m}m`;
+  } catch {
+    return null;
   }
 }
 
