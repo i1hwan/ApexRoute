@@ -4,6 +4,22 @@
 
 ---
 
+## [3.8.5] — 2026-05-08
+
+### 🐛 Bug Fixes
+
+- **`QuotaVisualization.pickWindow` no longer absorbs per-model quotas:** the previous "Pass 2" fallback matched any name starting with `weekly ` / `session `, so a connection that only reported `weekly Sonnet (7d)` (no canonical `weekly` row) could populate the overall mini-bar AND render as its own per-model bar simultaneously. The fallback is removed; only exact `session` / `weekly` and parenthesised forms (`session (5h)`, `weekly (7d)`) match. Regression test in `tests/unit/quota-visualization-pickwindow.test.mjs` (Oracle audit on PR #26 round 4).
+- **`RoutingBadge` tooltip now visible on short viewports:** the previous fix flipped vertically when the space above was insufficient, but never clamped the tooltip into the viewport, so very short viewports (or tooltip taller than `viewH - 2*padding`) still rendered partially off-screen. The new placement (1) prefers the side with more room (mirroring the providers/[id]/page.tsx overlay rule), (2) clamps the on-screen top using a transform-aware formula (above-anchored uses `translateY(-100%)`, so we require `top >= tooltipHeight + padding`), and (3) caps the rendered element with `maxHeight: calc(100vh - 16px)` + `overflow: hidden` so a tooltip larger than the viewport degrades to a clipped frame instead of off-screen content (Copilot review #R4-1, Oracle audit on PR #26 round 4).
+- **`isAffinityValid` no longer silently degrades when bound is missing from `scoredAlternatives`:** the previous code defaulted `boundScore` to `0` when `find()` returned `undefined`, which would let any positive alt trip the urgent-break rule. The function now returns `{ valid: true }` (keep affinity) on missing-bound rather than breaking on a missing signal. Production `selectByEarliestResetFirst` always includes the bound entry, so this is a future-caller footgun guard. New test SA-11.
+
+### 📚 Internal Notes
+
+- `/api/sessions` metadata-lookup catch now logs a sanitized warning (`[sessions] connection metadata lookup failed for N ids: <message>`) instead of swallowing the error silently. Operationally weak silent fallback was a Copilot review nit and an Oracle audit nit.
+- 6 new unit tests: 5 in `tests/unit/quota-visualization-pickwindow.test.mjs` covering the regression and 1 in `tests/unit/auth-strategy-earliest-reset-first.test.mjs` (SA-11). Test count: 2841/2841 PASS (was 2835; +6 net).
+- **Oracle pre-commit verification (`ses_1fc4cce1bffePsARTIZ6x3AxlY`):** initially returned NEEDS_REVISION with two real defects: `pickWindow` Pass 2 absorbing per-model quotas, and the R4-1 plan failing on viewports shorter than the tooltip height estimate. Both are fixed in this commit; the two NITs (footgun guard, sanitized log) are addressed alongside.
+
+---
+
 ## [3.8.4] — 2026-05-08
 
 ### 🐛 Bug Fixes

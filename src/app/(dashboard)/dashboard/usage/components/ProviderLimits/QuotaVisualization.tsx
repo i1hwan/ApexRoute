@@ -31,21 +31,19 @@ export function isOverallWindowName(name: string | null | undefined): boolean {
   return lower.startsWith("session (") || lower.startsWith("weekly (");
 }
 
-function pickWindow(quotas: QuotaItem[], windowKey: string): QuotaItem | null {
-  // Pass 1: exact match or "<key> (..." parenthesised window. This catches
-  // canonical labels like "weekly (7d)" / "session (5h)" but NOT model-specific
-  // variants like "weekly Sonnet (7d)" — those have a space + word before "(".
+export function pickWindow(quotas: QuotaItem[], windowKey: string): QuotaItem | null {
+  // Match ONLY canonical overall windows: exact "session"/"weekly", or
+  // parenthesised window like "weekly (7d)" / "session (5h)". Per-model
+  // variants like "weekly Sonnet (7d)" have a space + word before the paren
+  // and must NEVER populate the overall mini-bar — they are rendered as
+  // their own per-model bar in index.tsx via the !isOverallWindowName filter.
+  // A previous "Pass 2" fallback that matched any name starting with
+  // "weekly " could pull in "weekly Sonnet" when no canonical row existed,
+  // double-rendering the per-model quota. Removed (Oracle audit on PR #26).
   for (const q of quotas) {
     const name = (q.name || "").toLowerCase();
     if (name === windowKey) return q;
     if (name.startsWith(`${windowKey} (`) || name.startsWith(`${windowKey}(`)) return q;
-  }
-  // Pass 2: fallback for legacy unparenthesised forms. Only reached when no
-  // canonical match exists, so per-model windows still cannot collide with
-  // the overall window when the overall window is present in the cache.
-  for (const q of quotas) {
-    const name = (q.name || "").toLowerCase();
-    if (name.startsWith(`${windowKey} `)) return q;
   }
   return null;
 }

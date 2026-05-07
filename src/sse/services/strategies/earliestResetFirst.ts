@@ -565,7 +565,15 @@ export function isAffinityValid(
     // re-running scoreAccount(conn) — which would re-read quota cache and
     // contradict the "score upfront once" intent in selectByEarliestResetFirst.
     const boundScored = scoredAlternatives.find((sc) => sc.conn.id === conn.id);
-    const boundScore = boundScored?.score ?? 0;
+    if (!boundScored) {
+      // Caller passed a scored list that does not include bound. Production
+      // selectByEarliestResetFirst always includes it, so this only happens
+      // if a future caller misuses the API. Refuse to break on a missing
+      // signal: keep affinity rather than falling through to boundScore=0
+      // (which would let any positive alt trigger an urgent break).
+      return { valid: true };
+    }
+    const boundScore = boundScored.score ?? 0;
     const bestAltScore = Math.max(...usable.map((sc) => sc.score ?? 0));
 
     let isHeavyGap: boolean;

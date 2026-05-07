@@ -81,22 +81,56 @@ export default function RoutingBadge({ entry }: RoutingBadgeProps) {
   const updateCoords = useCallback(() => {
     if (!wrapperRef.current || typeof window === "undefined") return;
     const r = wrapperRef.current.getBoundingClientRect();
+    const viewW = window.innerWidth;
+    const viewH = window.innerHeight;
+
     const idealLeft = r.left + r.width / 2 - TOOLTIP_WIDTH_ESTIMATE_PX / 2;
     const left = Math.max(
       TOOLTIP_VIEWPORT_PADDING_PX,
-      Math.min(
-        window.innerWidth - TOOLTIP_WIDTH_ESTIMATE_PX - TOOLTIP_VIEWPORT_PADDING_PX,
-        idealLeft
-      )
+      Math.min(viewW - TOOLTIP_WIDTH_ESTIMATE_PX - TOOLTIP_VIEWPORT_PADDING_PX, idealLeft)
     );
-    // Vertical flip: when there isn't enough space above the badge for the
-    // tooltip + gap + viewport padding, render it below the badge instead.
-    // Mirrors the providers/[id]/page.tsx overlay flip behavior so badges
-    // near the top of the viewport don't render off-screen.
+
+    // Vertical placement: prefer the side with more room (mirrors the
+    // providers/[id]/page.tsx overlay rule), then clamp the on-screen top
+    // into the visible viewport. Effective tooltip height caps at
+    // viewH - 2*padding so a viewport SHORTER than the estimate degrades
+    // gracefully (paired with maxHeight/overflowY on the rendered element).
     const spaceAbove = r.top;
+    const spaceBelow = viewH - r.bottom;
     const spaceNeeded = TOOLTIP_HEIGHT_ESTIMATE_PX + TOOLTIP_GAP_PX + TOOLTIP_VIEWPORT_PADDING_PX;
-    const flip = spaceAbove < spaceNeeded;
-    const top = flip ? r.bottom + TOOLTIP_GAP_PX : r.top - TOOLTIP_GAP_PX;
+    const maxVisibleTooltipHeight = Math.max(0, viewH - 2 * TOOLTIP_VIEWPORT_PADDING_PX);
+    const tooltipHeight = Math.min(TOOLTIP_HEIGHT_ESTIMATE_PX, maxVisibleTooltipHeight);
+
+    let flip: boolean;
+    if (spaceAbove >= spaceNeeded) {
+      flip = false;
+    } else if (spaceBelow >= spaceNeeded) {
+      flip = true;
+    } else {
+      flip = spaceBelow > spaceAbove;
+    }
+
+    let top: number;
+    if (flip) {
+      // Below-anchored: no transform offset. On-screen top == top, on-screen
+      // bottom == top + tooltipHeight. Clamp into [pad, viewH - h - pad].
+      top = r.bottom + TOOLTIP_GAP_PX;
+      top = Math.max(
+        TOOLTIP_VIEWPORT_PADDING_PX,
+        Math.min(viewH - tooltipHeight - TOOLTIP_VIEWPORT_PADDING_PX, top)
+      );
+    } else {
+      // Above-anchored: render-side transform translateY(-100%) means the
+      // on-screen top == `top - tooltipHeight`, on-screen bottom == `top`.
+      // Require on-screen top >= pad  =>  top >= tooltipHeight + pad.
+      // Require on-screen bottom <= viewH - pad  =>  top <= viewH - pad.
+      top = r.top - TOOLTIP_GAP_PX;
+      top = Math.max(
+        tooltipHeight + TOOLTIP_VIEWPORT_PADDING_PX,
+        Math.min(viewH - TOOLTIP_VIEWPORT_PADDING_PX, top)
+      );
+    }
+
     setCoords({ left, top, flip });
   }, []);
 
@@ -147,6 +181,9 @@ export default function RoutingBadge({ entry }: RoutingBadgeProps) {
           top: coords.top,
           transform: coords.flip ? "translateY(0)" : "translateY(-100%)",
           zIndex: TOOLTIP_Z_INDEX,
+          maxWidth: `calc(100vw - ${TOOLTIP_VIEWPORT_PADDING_PX * 2}px)`,
+          maxHeight: `calc(100vh - ${TOOLTIP_VIEWPORT_PADDING_PX * 2}px)`,
+          overflow: "hidden",
         }}
         className="px-3 py-2 text-[11px] text-white bg-gray-900/95 rounded-md shadow-lg pointer-events-none border border-white/10 min-w-[220px] whitespace-pre-line"
       >

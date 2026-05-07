@@ -31,8 +31,12 @@ export async function GET() {
         for (const c of connections) {
           if (c.id) connMap.set(c.id, c);
         }
-      } catch {
+      } catch (err) {
         connMap = new Map();
+        const message = err instanceof Error ? err.message : String(err);
+        console.warn(
+          `[sessions] connection metadata lookup failed for ${sessionConnectionIds.length} ids: ${message}`
+        );
       }
     }
 

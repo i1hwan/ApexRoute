@@ -1120,7 +1120,38 @@ test("SA-10: isAffinityValid called without scoredAlternatives → backwards com
   const sessionId = `sa-10-session-${Math.random().toString(36).slice(2)}`;
   touchSession(sessionId, "bound");
 
-  // Direct call without scoredAlternatives
   const out = isAffinityValid(claudeConn("bound"), sessionId);
   assert.equal(out.valid, true, "low-Q without alt list should NOT trigger viability check");
+});
+
+test("SA-11: scoredAlternatives without bound entry → keep affinity (footgun guard)", () => {
+  // Future-proofing: if a caller passes a scored list that does NOT include
+  // the bound connection, we used to fall through to boundScore=0, which
+  // would let any positive alt trip the urgent-break rule (bestAlt > 0).
+  // The guard now keeps affinity instead of breaking on a missing signal.
+  // Use unique ids so prior tests' quotaCache entries do not pollute here.
+  const boundId = `sa-11-bound-${Math.random().toString(36).slice(2)}`;
+  const altId = `sa-11-alt-${Math.random().toString(36).slice(2)}`;
+  seedClaudeAccount(boundId, {
+    sessionRem: 80,
+    sessionResetSec: W_SESSION_SEC,
+    weeklyRem: 80,
+    weeklyResetSec: W_WEEKLY_SEC,
+  });
+  seedClaudeAccount(altId, {
+    sessionRem: 100,
+    sessionResetSec: W_SESSION_SEC / 4,
+    weeklyRem: 100,
+    weeklyResetSec: W_WEEKLY_SEC,
+  });
+  const sessionId = `sa-11-session-${Math.random().toString(36).slice(2)}`;
+  touchSession(sessionId, boundId);
+
+  const altScored = scoreAccount(claudeConn(altId));
+  const out = isAffinityValid(claudeConn(boundId), sessionId, [altScored]);
+  assert.equal(
+    out.valid,
+    true,
+    "scoredAlternatives missing bound → must NOT trigger urgent-break with boundScore=0"
+  );
 });
