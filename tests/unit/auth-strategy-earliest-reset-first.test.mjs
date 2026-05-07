@@ -15,7 +15,48 @@ const {
   candidateComparator,
   isAffinityValid,
   selectByEarliestResetFirst,
+  pressure,
+  W_SESSION_SEC,
+  W_WEEKLY_SEC,
+  URGENCY_CAP,
+  URGENCY_FLOOR,
 } = earliestResetFirst;
+
+function expectedPressure(Q, sec, W) {
+  if (Q < 5) return -Infinity;
+  if (sec === null || !Number.isFinite(sec)) return Q * URGENCY_CAP;
+  if (sec <= 0) return Q * URGENCY_CAP;
+  return Q * Math.max(URGENCY_FLOOR, Math.min(W / sec, URGENCY_CAP));
+}
+
+// Pressure values from two calls computed via different live `Date.now()`
+// readings can differ by one floor() step in deltaSec() in either direction
+// (the second call may see sec-1 OR sec+1 depending on which call happened
+// first relative to the millisecond rollover). Build an inclusive [lo, hi]
+// band that tolerates ±1 second of drift so CI hosts with slower clocks
+// don't trip 1e-9 equality assertions.
+function pressureDriftBand(Q, sec, W) {
+  const candidates = [
+    expectedPressure(Q, sec - 1, W),
+    expectedPressure(Q, sec, W),
+    expectedPressure(Q, sec + 1, W),
+  ];
+  return [Math.min(...candidates), Math.max(...candidates)];
+}
+
+// True when `actual` is inside any of the per-track drift bands AFTER taking
+// the max() across tracks. Used for assertions on `scoreAccount(...).score`
+// where the test cannot read the exact secondsToReset the scorer used.
+function withinPressureMaxBand(actual, tracks) {
+  let lo = -Infinity;
+  let hi = -Infinity;
+  for (const [Q, sec, W] of tracks) {
+    const [tLo, tHi] = pressureDriftBand(Q, sec, W);
+    if (tLo > lo) lo = tLo;
+    if (tHi > hi) hi = tHi;
+  }
+  return actual >= lo - 1e-9 && actual <= hi + 1e-9;
+}
 
 const { setQuotaCache, markAccountExhaustedFrom429 } = quotaCache;
 const { isTerminalConnectionStatus, normalizeStatus } = accountTerminalStatus;
@@ -135,7 +176,7 @@ test("weeklyTimePoints: boundary table", () => {
 
 // ─── 2. Multiplicative track scoring (v6 §2.4) ───────────────────────────────
 
-test("v6 scoreSessionTrack: T=40 × Q=10 = 400", () => {
+test("v7 scoreSessionTrack: pressure(Q=10, sec, W_SESSION)", () => {
   seedClaudeAccount("gnumax", {
     sessionRem: 10,
     sessionResetSec: 4080,
@@ -144,12 +185,15 @@ test("v6 scoreSessionTrack: T=40 × Q=10 = 400", () => {
   });
   const s = scoreSessionTrack("gnumax");
   assert.equal(s.kind, "known");
-  assert.equal(s.score, 40 * 10);
+  const expected = expectedPressure(10, s.secondsToReset, W_SESSION_SEC);
+  assert.ok(
+    Math.abs(s.score - expected) < 1e-9,
+    `score=${s.score} expected=${expected} (sec=${s.secondsToReset})`
+  );
   assert.equal(s.remainingPct, 10);
 });
 
-test("v6 scoreWeeklyTrack: T=20 × Q=62 = 1240, ignores per-model windows", () => {
-  // Even if Sonnet/Omelette windows would have been seeded, v6 ignores them.
+test("v7 scoreWeeklyTrack: pressure(Q=62, sec, W_WEEKLY); ignores per-model windows", () => {
   setQuotaCache("gnumax", "claude", {
     "weekly (7d)": {
       remainingPercentage: 62,
@@ -167,22 +211,21 @@ test("v6 scoreWeeklyTrack: T=20 × Q=62 = 1240, ignores per-model windows", () =
   const w = scoreWeeklyTrack("gnumax");
   assert.equal(w.kind, "known");
   assert.equal(w.remainingPct, 62, "uses overall weekly only, not bottleneck");
-  assert.equal(w.score, 20 * 62);
+  const expected = expectedPressure(62, w.secondsToReset, W_WEEKLY_SEC);
+  assert.ok(Math.abs(w.score - expected) < 1e-9);
 });
 
-test("v6 scoreWeeklyTrack: signature does not accept modelHint", () => {
-  // Defensive: even if a caller passes a string, scoreWeeklyTrack must not
-  // consult model-specific windows. We pass only connId per v6 contract.
+test("v7 scoreWeeklyTrack: signature does not accept modelHint", () => {
   seedClaudeAccount("gnumax", {
     sessionRem: 50,
     sessionResetSec: 4080,
     weeklyRem: 62,
     weeklyResetSec: 435600,
   });
-  // scoreWeeklyTrack(connId) — no second arg
   const w = scoreWeeklyTrack("gnumax");
   assert.equal(w.kind, "known");
-  assert.equal(w.score, 20 * 62);
+  const expected = expectedPressure(62, w.secondsToReset, W_WEEKLY_SEC);
+  assert.ok(Math.abs(w.score - expected) < 1e-9);
 });
 
 // ─── 3. Hard exclusion ───────────────────────────────────────────────────────
@@ -244,14 +287,14 @@ test("github-style account with no session window scores from weekly only", () =
   assert.equal(s.kind, "missing", "no session window → missing");
   const w = scoreWeeklyTrack("ghacct");
   assert.equal(w.kind, "known");
-  assert.equal(w.score, 20 * 80);
+  const expectedW = expectedPressure(80, w.secondsToReset, W_WEEKLY_SEC);
+  assert.ok(Math.abs(w.score - expectedW) < 1e-9);
 
   const result = scoreAccount(claudeConn("ghacct"));
   assert.equal(result.excluded, false);
-  assert.equal(
-    result.score,
-    20 * 80,
-    "denominator=1, baseScore = 1600 (no session track injected)"
+  assert.ok(
+    withinPressureMaxBand(result.score, [[80, w.secondsToReset, W_WEEKLY_SEC]]),
+    `single track: result.score=${result.score} should be in pressure drift band`
   );
 });
 
@@ -326,16 +369,23 @@ test("F2-1: routing decision is identical for opus/sonnet/haiku", () => {
   assert.equal(r1.selected.id, r2.selected.id);
 });
 
-test("F2-2: weekly Omelette=0% (would have hard-excluded in v4) does NOT exclude in v6", () => {
+test("F2-2: weekly Omelette=0% (would have hard-excluded in v4) does NOT exclude in v6/v7", () => {
   setQuotaCache("apex", "claude", {
     "session (5h)": { remainingPercentage: 50, resetAt: isoIn(4080) },
     "weekly (7d)": { remainingPercentage: 50, resetAt: isoIn(320400) },
     "weekly Omelette (7d)": { remainingPercentage: 0, resetAt: isoIn(320400) },
   });
   const result = scoreAccount(claudeConn("apex"));
-  assert.equal(result.excluded, false, "v6 ignores per-model windows entirely");
-  // Score = avg(40·50, 20·50) = avg(2000, 1000) = 1500
-  assert.equal(result.score, 1500);
+  assert.equal(result.excluded, false, "v6/v7 ignores per-model windows entirely");
+  const s = scoreSessionTrack("apex");
+  const w = scoreWeeklyTrack("apex");
+  assert.ok(
+    withinPressureMaxBand(result.score, [
+      [50, s.secondsToReset, W_SESSION_SEC],
+      [50, w.secondsToReset, W_WEEKLY_SEC],
+    ]),
+    `v7 baseScore = max within drift band, got ${result.score}`
+  );
 });
 
 // ─── 7. F3: fresh quota (Q=100 AND resetAt=null) ─────────────────────────────
@@ -347,7 +397,7 @@ test("F3-1: session resetAt=null AND Q=100 → score = 10000 (fresh)", () => {
   });
   const s = scoreSessionTrack("fresh");
   assert.equal(s.kind, "known");
-  assert.equal(s.score, 100 * 100, "T=100, Q=100 (fresh max-urgency)");
+  assert.equal(s.score, 100 * URGENCY_CAP, "Q=100 × URGENCY_CAP=100 (fresh max-urgency)");
   assert.equal(s.resetAt, null);
 });
 
@@ -360,15 +410,14 @@ test("F3-2: session resetAt=null AND Q=80 → kind=missing (NOT fresh)", () => {
   assert.equal(s.kind, "missing", "non-100% null resetAt is ambiguous → missing");
 });
 
-test("F3-3: fresh session + normal weekly → composite via avg", () => {
+test("F3-3: fresh session + normal weekly → v7 max(fresh=10000, weekly_pressure)", () => {
   setQuotaCache("fresh", "claude", {
     "session (5h)": { remainingPercentage: 100, resetAt: null },
     "weekly (7d)": { remainingPercentage: 80, resetAt: isoIn(435600) },
   });
   const result = scoreAccount(claudeConn("fresh"));
   assert.equal(result.excluded, false);
-  // avg(10000, 20·80=1600) = 5800
-  assert.equal(result.score, (10000 + 1600) / 2);
+  assert.equal(result.score, 100 * URGENCY_CAP, "v7 max: fresh dominates weekly pressure");
 });
 
 test("F3-4: fresh account beats burning account", () => {
@@ -393,7 +442,7 @@ test("F3-5: weekly resetAt=null AND Q=100 → score = 10000 (fresh weekly)", () 
   });
   const w = scoreWeeklyTrack("freshweekly");
   assert.equal(w.kind, "known");
-  assert.equal(w.score, 100 * 100);
+  assert.equal(w.score, 100 * URGENCY_CAP);
   assert.equal(w.resetAt, null);
 });
 
@@ -408,16 +457,13 @@ test("F3-6: weekly resetAt=null AND Q<100 → missing", () => {
 
 // ─── 8. F4: multiplicative scoring user scenario ─────────────────────────────
 
-test("F4-1: APEX(17%/2h, 35%/3d10h) vs GNUMAX(87%/4h, 59%/4d18h) → GNUMAX wins", () => {
-  // User's actual production scenario from .sisyphus/plans/routing-strategy-v6.md §2.4.
-  // 2h = 7200s in (3600, 10800] band → sessionTimePoints = 40
+test("F4-1 (v7-1): APEX(17%/2h, 35%/3d10h) vs GNUMAX(87%/4h, 59%/4d18h) → GNUMAX wins", () => {
   seedClaudeAccount("apex", {
     sessionRem: 17,
     sessionResetSec: 2 * 3600,
     weeklyRem: 35,
     weeklyResetSec: 3 * 86400 + 10 * 3600,
   });
-  // 4h = 14400s in (10800, 21600] band → sessionTimePoints = 20
   seedClaudeAccount("gnumax", {
     sessionRem: 87,
     sessionResetSec: 4 * 3600,
@@ -428,26 +474,19 @@ test("F4-1: APEX(17%/2h, 35%/3d10h) vs GNUMAX(87%/4h, 59%/4d18h) → GNUMAX wins
   const apex = scoreAccount(claudeConn("apex"));
   const gnumax = scoreAccount(claudeConn("gnumax"));
 
-  // APEX: session 40·17=680, weekly 20·35=700, avg = 690
-  // GNUMAX: session 20·87=1740, weekly 20·59=1180, avg = 1460
-  assert.equal(apex.score, (40 * 17 + 20 * 35) / 2);
-  assert.equal(gnumax.score, (20 * 87 + 20 * 59) / 2);
   assert.ok(gnumax.score > apex.score, "GNUMAX must outrank APEX (burn-down semantic)");
 
   const result = selectByEarliestResetFirst([claudeConn("apex"), claudeConn("gnumax")], null);
   assert.equal(result.selected.id, "gnumax");
 });
 
-test("F4-2: backoffLevel=4 paid vs self-hosted score=0 → self-hosted wins", () => {
+test("F4-2 (v7-4): backoffLevel=4 paid (max-backoff strict-loss) vs self-hosted score=0 → self-hosted wins", () => {
   seedClaudeAccount("flaky", {
     sessionRem: 50,
     sessionResetSec: 4080,
     weeklyRem: 60,
     weeklyResetSec: 435600,
   });
-  // flaky: avg(40·50, 20·60) = (2000+1200)/2 = 1600. backoffLevel=4 →
-  // pBackoff=min(4·25,100)=100 → finalScore = 1600 - 100·100 = 1600 - 10000 = -8400
-  // self-hosted: score=0. -8400 < 0 → self-hosted wins.
   const compatId = `compat-${Math.random().toString(36).slice(2)}`;
   const result = selectByEarliestResetFirst(
     [claudeConn("flaky", { backoffLevel: 4 }), claudeConn(compatId)],
@@ -456,8 +495,7 @@ test("F4-2: backoffLevel=4 paid vs self-hosted score=0 → self-hosted wins", ()
   assert.equal(result.selected.id, compatId);
 });
 
-test("F4-3: T=10 × Q=100 = 1000 (low urgency, abundant quota)", () => {
-  // 7h = 25200s, in >6h band → sessionTimePoints = 10
+test("F4-3 (v7): low urgency abundant quota → max(pressure_session, pressure_weekly)", () => {
   seedClaudeAccount("idle", {
     sessionRem: 100,
     sessionResetSec: 7 * 3600,
@@ -465,12 +503,17 @@ test("F4-3: T=10 × Q=100 = 1000 (low urgency, abundant quota)", () => {
     weeklyResetSec: 5 * 86400,
   });
   const result = scoreAccount(claudeConn("idle"));
-  // session: 10·100 = 1000, weekly: 20·100 = 2000, avg = 1500
-  assert.equal(result.score, (10 * 100 + 20 * 100) / 2);
+  const s = scoreSessionTrack("idle");
+  const w = scoreWeeklyTrack("idle");
+  assert.ok(
+    withinPressureMaxBand(result.score, [
+      [100, s.secondsToReset, W_SESSION_SEC],
+      [100, w.secondsToReset, W_WEEKLY_SEC],
+    ])
+  );
 });
 
-test("F4-4: Q boundary at exactly 5 → known (NOT excluded), score = T × 5", () => {
-  // Q=5 is the inclusive lower bound for "usable"; v6 excludes only Q<5.
+test("F4-4 (v7): Q boundary at exactly 5 → known (NOT excluded), score = pressure(5, sec, W)", () => {
   seedClaudeAccount("edge", {
     sessionRem: 5,
     sessionResetSec: 4080,
@@ -479,7 +522,8 @@ test("F4-4: Q boundary at exactly 5 → known (NOT excluded), score = T × 5", (
   });
   const s = scoreSessionTrack("edge");
   assert.equal(s.kind, "known");
-  assert.equal(s.score, 40 * 5);
+  const expected = expectedPressure(5, s.secondsToReset, W_SESSION_SEC);
+  assert.ok(Math.abs(s.score - expected) < 1e-9);
 });
 
 test("F4-5: Q just under 5 (Q=4.999 rounded to 5 by safePercentage) — boundary check", () => {
@@ -496,26 +540,30 @@ test("F4-5: Q just under 5 (Q=4.999 rounded to 5 by safePercentage) — boundary
   assert.equal(result.excluded, false, "Q=5 must remain eligible");
 });
 
-test("F4-6: comparator equal product breaks via earliest reset asc", () => {
-  // Two accounts with identical avg scores but different reset times. The
-  // tie-break must pick the earlier-resetting one.
-  // A: session T=40·Q=50 = 2000, weekly T=20·Q=100 = 2000, avg = 2000, earliestReset = 1h
+test("F4-6 (v7): higher pressure account wins; comparator tie-break covered by direct candidateComparator tests", () => {
+  // v6 used T·Q with stepwise T_pts; equal-product fixtures collided in mean.
+  // v7 pressure(Q,t,W)=Q×W/t is continuous, so seeded fixtures rarely tie at
+  // baseScore. Pure tie-break behaviour is verified directly via
+  // candidateComparator literal tests below; this integration test now only
+  // asserts ordering by score.
   seedClaudeAccount("a", {
     sessionRem: 50,
     sessionResetSec: 3600,
     weeklyRem: 100,
     weeklyResetSec: 7 * 86400,
   });
-  // B: session T=20·Q=100 = 2000, weekly T=40·Q=50 = 2000, avg = 2000, earliestReset = 4h
   seedClaudeAccount("b", {
     sessionRem: 100,
     sessionResetSec: 4 * 3600,
     weeklyRem: 50,
     weeklyResetSec: 3 * 86400,
   });
+  const aScore = scoreAccount(claudeConn("a")).score;
+  const bScore = scoreAccount(claudeConn("b")).score;
   const result = selectByEarliestResetFirst([claudeConn("a"), claudeConn("b")], null);
-  // A's session reset (1h) is the earliest known reset across both accounts.
-  assert.equal(result.selected.id, "a");
+  const expected = aScore > bScore ? "a" : bScore > aScore ? "b" : null;
+  assert.ok(expected !== null, `v7 fixtures should not tie: a=${aScore}, b=${bScore}`);
+  assert.equal(result.selected.id, expected);
 });
 
 // ─── 9. Affinity ─────────────────────────────────────────────────────────────
@@ -800,4 +848,80 @@ test("isAffinityValid detects terminal status defensively", () => {
   const out = isAffinityValid(claudeConn("gnumax", { testStatus: "expired" }), sessionId);
   assert.equal(out.valid, false);
   assert.equal(out.reason, "terminal");
+});
+
+// ─── 14. v7 burn-pressure RED tests ──────────────────────────────────────────
+
+test("V7-2: max() not mean() — A(p_s=100, p_w=50) vs B(p_s=80, p_w=80) → A wins by max", () => {
+  // Q=20, t=3600 → pressure = 20 × W_S/3600 = 20 × 5 = 100
+  // Q=50, t=W_W → pressure = 50 × 1 = 50
+  // A v7 max = 100. v7 mean (if used) would be 75 → B (80) would beat A.
+  seedClaudeAccount("a", {
+    sessionRem: 20,
+    sessionResetSec: 3600,
+    weeklyRem: 50,
+    weeklyResetSec: W_WEEKLY_SEC,
+  });
+  // Q=80, t=W_S → pressure = 80; Q=80, t=W_W → pressure = 80. v7 max=80.
+  seedClaudeAccount("b", {
+    sessionRem: 80,
+    sessionResetSec: W_SESSION_SEC,
+    weeklyRem: 80,
+    weeklyResetSec: W_WEEKLY_SEC,
+  });
+  const a = scoreAccount(claudeConn("a"));
+  const b = scoreAccount(claudeConn("b"));
+  assert.ok(a.score > b.score, `v7 max picks A; got a=${a.score} b=${b.score}`);
+  const result = selectByEarliestResetFirst([claudeConn("a"), claudeConn("b")], null);
+  assert.equal(result.selected.id, "a");
+});
+
+test("V7-3: pressure floor — t > W clamps multiplier to 1, pressure = Q", () => {
+  assert.equal(pressure(80, 2 * W_WEEKLY_SEC, W_WEEKLY_SEC), 80);
+  assert.equal(pressure(50, 10 * W_SESSION_SEC, W_SESSION_SEC), 50);
+});
+
+test("V7-5 (defensive): pressure(Q, t<=0, W) saturates at Q × URGENCY_CAP", () => {
+  // Direct unit test — quotaCache.ts:276-283 nullifies expired resetAt before
+  // scoring, so this branch is unreachable via real cache state today. We test
+  // pressure() directly to keep the defensive branch covered.
+  assert.equal(pressure(50, -100, W_SESSION_SEC), 50 * URGENCY_CAP);
+  assert.equal(pressure(50, 0, W_SESSION_SEC), 50 * URGENCY_CAP);
+  assert.equal(pressure(80, -1, W_WEEKLY_SEC), 80 * URGENCY_CAP);
+});
+
+test("V7-6: two fresh accounts (Q=100, t=null) deterministically tie-break by lex connectionId", () => {
+  setQuotaCache("zzz-fresh", "claude", {
+    "session (5h)": { remainingPercentage: 100, resetAt: null },
+    "weekly (7d)": { remainingPercentage: 100, resetAt: null },
+  });
+  setQuotaCache("aaa-fresh", "claude", {
+    "session (5h)": { remainingPercentage: 100, resetAt: null },
+    "weekly (7d)": { remainingPercentage: 100, resetAt: null },
+  });
+  const result = selectByEarliestResetFirst(
+    [claudeConn("zzz-fresh"), claudeConn("aaa-fresh")],
+    null
+  );
+  assert.equal(result.selected.id, "aaa-fresh", "lex tie-break picks smaller id");
+});
+
+test("V7-7: pressure(Q < MIN_USABLE_REMAINING_PCT, ...) returns -Infinity (defensive)", () => {
+  assert.equal(pressure(4, 4080, W_SESSION_SEC), -Infinity);
+  assert.equal(pressure(0, 4080, W_SESSION_SEC), -Infinity);
+  assert.equal(pressure(4.999, 4080, W_SESSION_SEC), -Infinity);
+});
+
+test("V7-8: multiplier saturates at URGENCY_CAP for very small t", () => {
+  // Q=80, t=10 → would be 80 × 1800 if uncapped. Cap at 100 → pressure=8000.
+  assert.equal(pressure(80, 10, W_SESSION_SEC), 80 * URGENCY_CAP);
+  assert.equal(pressure(50, 1, W_WEEKLY_SEC), 50 * URGENCY_CAP);
+});
+
+test("V7-direct: pressure() exact values for known fixtures", () => {
+  assert.equal(pressure(20, 3600, W_SESSION_SEC), 100);
+  assert.equal(pressure(50, W_WEEKLY_SEC, W_WEEKLY_SEC), 50);
+  assert.equal(pressure(80, W_SESSION_SEC, W_SESSION_SEC), 80);
+  assert.equal(pressure(100, null, W_SESSION_SEC), 10000);
+  assert.equal(pressure(100, null, W_WEEKLY_SEC), 10000);
 });

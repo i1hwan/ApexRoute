@@ -16,13 +16,16 @@ import Badge from "@/shared/components/Badge";
 import { CardSkeleton } from "@/shared/components/Loading";
 import { USAGE_SUPPORTED_PROVIDERS } from "@/shared/constants/providers";
 import { pickMaskedDisplayValue } from "@/shared/utils/maskEmail";
+import RoutingBadge, { type RoutingPreviewEntry } from "./RoutingBadge";
+import RoutingTransparencyBanner from "./RoutingTransparencyBanner";
+import AutoRefreshControl from "./AutoRefreshControl";
+import QuotaVisualization, { isOverallWindowName } from "./QuotaVisualization";
+import { getBarColor } from "./quotaColors";
 
 const LS_GROUP_BY = "omniroute:limits:groupBy";
 const LS_EXPANDED_GROUPS = "omniroute:limits:expandedGroups";
 
 const MIN_FETCH_INTERVAL_MS = 30000; // Debounce per-connection fetches
-const QUOTA_BAR_GREEN_THRESHOLD = 50;
-const QUOTA_BAR_YELLOW_THRESHOLD = 20;
 
 // Provider display config
 const PROVIDER_CONFIG = {
@@ -47,17 +50,6 @@ const TIER_FILTERS = [
   { key: "free", labelKey: "tierFree" },
   { key: "unknown", labelKey: "tierUnknown" },
 ];
-
-// Get bar color based on remaining percentage
-function getBarColor(remainingPercentage) {
-  if (remainingPercentage > QUOTA_BAR_GREEN_THRESHOLD) {
-    return { bar: "#22c55e", text: "#22c55e", bg: "rgba(34,197,94,0.12)" };
-  }
-  if (remainingPercentage > QUOTA_BAR_YELLOW_THRESHOLD) {
-    return { bar: "#eab308", text: "#eab308", bg: "rgba(234,179,8,0.12)" };
-  }
-  return { bar: "#ef4444", text: "#ef4444", bg: "rgba(239,68,68,0.12)" };
-}
 
 // Format countdown
 function formatCountdown(resetAt) {
@@ -87,6 +79,10 @@ export default function ProviderLimits() {
   const [refreshingAll, setRefreshingAll] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const [tierFilter, setTierFilter] = useState("all");
+  const [routingByConnection, setRoutingByConnection] = useState<
+    Record<string, RoutingPreviewEntry>
+  >({});
+  const [configuredRoutingStrategy, setConfiguredRoutingStrategy] = useState<string>("fill-first");
   const [groupBy, setGroupBy] = useState<"none" | "environment">(() => {
     if (typeof window === "undefined") return "none";
     const saved = localStorage.getItem(LS_GROUP_BY);
@@ -149,9 +145,31 @@ export default function ProviderLimits() {
       const response = await fetch("/api/usage/provider-limits");
       if (!response.ok) throw new Error("Failed");
       const data = await response.json();
+      if (data.routing && typeof data.routing === "object") {
+        setRoutingByConnection(data.routing as Record<string, RoutingPreviewEntry>);
+      }
+      if (typeof data.configuredRoutingStrategy === "string") {
+        setConfiguredRoutingStrategy(data.configuredRoutingStrategy);
+      }
       return data.caches || {};
     } catch {
       return {};
+    }
+  }, []);
+
+  const refreshRoutingOnly = useCallback(async () => {
+    try {
+      const r = await fetch("/api/usage/provider-limits");
+      if (!r.ok) return;
+      const j = await r.json();
+      if (j.routing && typeof j.routing === "object") {
+        setRoutingByConnection(j.routing as Record<string, RoutingPreviewEntry>);
+      }
+      if (typeof j.configuredRoutingStrategy === "string") {
+        setConfiguredRoutingStrategy(j.configuredRoutingStrategy);
+      }
+    } catch {
+      // best-effort routing refresh; main quota path is independent
     }
   }, []);
 
@@ -212,6 +230,7 @@ export default function ProviderLimits() {
           ...prev,
           [connectionId]: new Date().toISOString(),
         }));
+        void refreshRoutingOnly();
       } catch (error) {
         setErrors((prev) => ({
           ...prev,
@@ -221,7 +240,7 @@ export default function ProviderLimits() {
         setLoading((prev) => ({ ...prev, [connectionId]: false }));
       }
     },
-    []
+    [refreshRoutingOnly]
   );
 
   const refreshProvider = useCallback(
@@ -246,6 +265,12 @@ export default function ProviderLimits() {
       const connectionList = await fetchConnections();
       applyCachedQuotaState(connectionList, data.caches || {});
       setErrors(data.errors || {});
+      if (data.routing && typeof data.routing === "object") {
+        setRoutingByConnection(data.routing as Record<string, RoutingPreviewEntry>);
+      }
+      if (typeof data.configuredRoutingStrategy === "string") {
+        setConfiguredRoutingStrategy(data.configuredRoutingStrategy);
+      }
     } catch (error) {
       console.error("Error refreshing all:", error);
     } finally {
@@ -468,8 +493,17 @@ export default function ProviderLimits() {
             </span>
             {t("refreshAll")}
           </button>
+
+          <AutoRefreshControl onTrigger={refreshAll} />
         </div>
       </div>
+
+      <RoutingTransparencyBanner
+        routing={routingByConnection}
+        configuredStrategy={configuredRoutingStrategy}
+        connections={visibleConnections}
+        providerConfig={PROVIDER_CONFIG}
+      />
 
       {/* Tier Filters */}
       <div className="flex items-center gap-2 flex-wrap">
@@ -525,6 +559,7 @@ export default function ProviderLimits() {
             return (
               <div
                 key={conn.id}
+                data-connection-id={conn.id}
                 className="items-center px-4 py-3.5 transition-[background] duration-150 hover:bg-black/[0.03] dark:hover:bg-white/[0.02]"
                 style={{
                   display: "grid",
@@ -569,6 +604,7 @@ export default function ProviderLimits() {
                           {tierMeta.label}
                         </Badge>
                       </span>
+                      <RoutingBadge entry={routingByConnection[conn.id]} />
                       <span className="text-[11px] leading-none text-text-muted">
                         {config.label}
                       </span>
@@ -595,63 +631,68 @@ export default function ProviderLimits() {
                   ) : quota?.message && (!quota.quotas || quota.quotas.length === 0) ? (
                     <div className="text-xs text-text-muted italic">{quota.message}</div>
                   ) : quota?.quotas?.length > 0 ? (
-                    quota.quotas.map((q, i) => {
-                      const remainingPercentage = q.unlimited
-                        ? 100
-                        : (q.remainingPercentage ?? calculatePercentage(q.used, q.total));
-                      const colors = getBarColor(remainingPercentage);
-                      const cd = formatCountdown(q.resetAt);
-                      const shortName = formatQuotaLabel(q.name);
-                      const staleAfterReset = q.staleAfterReset === true;
+                    <>
+                      <QuotaVisualization quotas={quota.quotas} />
+                      {quota.quotas
+                        .filter((q) => !isOverallWindowName(q?.name))
+                        .map((q, i) => {
+                          const remainingPercentage = q.unlimited
+                            ? 100
+                            : (q.remainingPercentage ?? calculatePercentage(q.used, q.total));
+                          const colors = getBarColor(remainingPercentage);
+                          const cd = formatCountdown(q.resetAt);
+                          const shortName = formatQuotaLabel(q.name);
+                          const staleAfterReset = q.staleAfterReset === true;
 
-                      return (
-                        <div
-                          key={i}
-                          className={`flex items-center gap-1.5 min-w-[200px] shrink-0 ${
-                            i > 0 ? "border-l border-border/80 pl-3 ml-1" : ""
-                          }`}
-                        >
-                          {/* Model label */}
-                          <span
-                            title={q.modelKey || q.name}
-                            className="text-[11px] font-semibold py-0.5 px-2 rounded whitespace-nowrap min-w-[60px] text-center"
-                            style={{ background: colors.bg, color: colors.text }}
-                          >
-                            {shortName}
-                          </span>
-
-                          {/* Countdown */}
-                          {staleAfterReset ? (
-                            <span className="text-[10px] text-text-muted whitespace-nowrap">
-                              ⟳ Refreshing...
-                            </span>
-                          ) : cd ? (
-                            <span className="text-[10px] text-text-muted whitespace-nowrap">
-                              ⏱ {cd}
-                            </span>
-                          ) : null}
-
-                          {/* Progress bar */}
-                          <div className="flex-1 h-1.5 rounded-sm bg-black/[0.06] dark:bg-white/[0.06] min-w-[60px] overflow-hidden">
+                          return (
                             <div
-                              className="h-full rounded-sm transition-[width] duration-300 ease-out"
-                              style={{
-                                width: `${Math.min(remainingPercentage, 100)}%`,
-                                background: colors.bar,
-                              }}
-                            />
-                          </div>
+                              key={i}
+                              className={`flex items-center gap-1.5 min-w-[200px] shrink-0 ${
+                                i > 0 ? "border-l border-border/80 pl-3 ml-1" : ""
+                              }`}
+                            >
+                              {/* Model label */}
+                              <span
+                                title={q.modelKey || q.name}
+                                className="text-[11px] font-semibold py-0.5 px-2 rounded whitespace-nowrap min-w-[60px] text-center"
+                                style={{ background: colors.bg, color: colors.text }}
+                              >
+                                {shortName}
+                              </span>
 
-                          {/* Percentage */}
-                          <span
-                            className="text-[11px] font-semibold min-w-[32px] text-right"
-                            style={{ color: colors.text }}
-                          >
-                            {remainingPercentage}%
-                          </span>
-                        </div>
-                      );
-                    })
+                              {/* Countdown */}
+                              {staleAfterReset ? (
+                                <span className="text-[10px] text-text-muted whitespace-nowrap">
+                                  ⟳ Refreshing...
+                                </span>
+                              ) : cd ? (
+                                <span className="text-[10px] text-text-muted whitespace-nowrap">
+                                  ⏱ {cd}
+                                </span>
+                              ) : null}
+
+                              {/* Progress bar */}
+                              <div className="flex-1 h-1.5 rounded-sm bg-black/[0.06] dark:bg-white/[0.06] min-w-[60px] overflow-hidden">
+                                <div
+                                  className="h-full rounded-sm transition-[width] duration-300 ease-out"
+                                  style={{
+                                    width: `${Math.min(remainingPercentage, 100)}%`,
+                                    background: colors.bar,
+                                  }}
+                                />
+                              </div>
+
+                              {/* Percentage */}
+                              <span
+                                className="text-[11px] font-semibold min-w-[32px] text-right"
+                                style={{ color: colors.text }}
+                              >
+                                {remainingPercentage}%
+                              </span>
+                            </div>
+                          );
+                        })}
+                    </>
                   ) : (
                     <div className="text-xs text-text-muted italic">{t("noQuotaData")}</div>
                   )}

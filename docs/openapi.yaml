@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: OmniRoute API
-  version: 3.7.1
+  version: 3.8.1
   description: |
     OmniRoute is a local-first AI API proxy router. It provides an OpenAI-compatible
     endpoint that routes requests to multiple AI providers with load balancing,
@@ -947,6 +947,56 @@ paths:
       responses:
         "200":
           description: Usage analytics data
+
+  /api/usage/provider-limits:
+    get:
+      tags: [Usage]
+      summary: Get cached provider limits + per-provider routing preview
+      description: |
+        Returns the cached Provider Limits map (no upstream refresh), the
+        scheduler interval, the timestamp of the most recent automatic sync,
+        the configured fallback strategy after normalization, and a routing
+        preview map keyed by connection id. The routing map mirrors what
+        auth would pick next per provider under the configured strategy
+        (model-agnostic; per-request model lockout is not reproduced).
+      responses:
+        "200":
+          description: Cached provider limits and routing preview
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  caches:
+                    type: object
+                  intervalMinutes:
+                    type: number
+                  lastAutoSyncAt:
+                    type: string
+                    nullable: true
+                  configuredRoutingStrategy:
+                    type: string
+                    description: Normalized configured fallback strategy.
+                  routing:
+                    type: object
+                    additionalProperties:
+                      type: object
+                      properties:
+                        strategy: { type: string }
+                        rank: { type: integer, nullable: true }
+                        isNext: { type: boolean }
+                        excluded: { type: boolean }
+                        excludedReason: { type: string, nullable: true }
+                        score: { type: number, nullable: true }
+                        breakdown:
+                          type: object
+                          nullable: true
+    post:
+      tags: [Usage]
+      summary: Refresh all provider limits and return updated cache + routing preview
+      responses:
+        "200":
+          description: Refreshed provider limits with routing preview
 
   /api/usage/call-logs:
     get:
