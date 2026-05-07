@@ -4,6 +4,33 @@
 
 ---
 
+## [3.8.2] — 2026-05-08
+
+### ✨ Features
+
+- **Smart session affinity continuation:** v8 of the routing affinity logic. The 5-minute affinity window matches Anthropic's prompt cache TTL exactly (sliding refresh, librarian-confirmed). On top of the existing hard-exclusion gates, two heuristic break rules now protect against pathological "stay on a doomed account" cases:
+  - `affinity_break_low_quota`: bound's minimum known remaining percentage drops below 15% AND a usable alternative exists (Oracle bg_79458ad3: 5% hard-exclusion × 3 cushion).
+  - `affinity_break_p1_too_urgent`: a usable alt scores ≥ 3× bound AND ≥ 250 absolute delta. The absolute delta neutralizes near-zero misfire (bound=20, alt=61 trips 3× alone but the 41-point urgency difference doesn't justify a cache write).
+  - 60-second cooldown per-session prevents oscillation between two close-pressure accounts. Hard exclusions bypass cooldown.
+- **SessionsTab account name:** `/api/sessions` enriches each session with `accountName` (resolved via `getAccountDisplayName`) and `provider`. Active Sessions widget now shows the bound account label and provider tag instead of a truncated raw connection ID. Graceful degradation: provider connection lookup failures fall back to `Account #xxxxxx` without breaking the API.
+
+### 🐛 Bug Fixes
+
+- **AutoRefreshControl design system alignment:** raw `<input type="checkbox">` replaced with `<Toggle>` from the shared design system. Raw `<select>` styled to match the rest of the dashboard (rounded `bg-surface` border, focus ring, custom chevron icon via `material-symbols-outlined`). Auto-refresh control now visually consistent with other dashboard toggles and selects.
+- **RoutingBadge tooltip portal escape:** tooltip rendering moved from in-place `position: absolute` to `createPortal(..., document.body)` with `position: fixed`. Tooltip now escapes overflow-hidden containers like the Provider Limits card and group rows. Coordinates derived from the badge's `getBoundingClientRect()` and clamped to the viewport (8px padding) on resize/scroll. Portal pattern matches the codebase's existing `providers/[id]/page.tsx` overlay.
+
+### 🌐 Internationalization
+
+- New `usage.connectionFallback` i18n key for SessionsTab account-name fallback. English and Korean hand-translated; 30 other locales seeded with `Account #{id}` placeholder.
+
+### 📚 Internal Notes
+
+- 10 new unit tests `SA-1`..`SA-10` cover smart affinity (low-quota break, urgent-alt break, cooldown, hard-exclusion bypass, no-alt edge, missing-track edge, backwards-compat third-arg). Test cooldown reset hook added to prevent cross-test pollution. Full test suite: 2830/2830 PASS (was 2821; +9 net).
+- Plan: `.sisyphus/plans/limits-dashboard-polish.md` (Oracle APPROVED with revisions, Momus v1→v2 OKAY).
+- `isAffinityValid` signature extended with optional `scoredAlternatives` parameter (backwards compatible). `selectByEarliestResetFirst` scores all candidates upfront and passes them to the affinity check, avoiding double scoring.
+
+---
+
 ## [3.8.1] — 2026-05-07
 
 ### 🐛 Bug Fixes

@@ -2491,6 +2491,7 @@
     "age": "उम्र",
     "requests": "अनुरोध",
     "connection": "कनेक्शन",
+    "connectionFallback": "Account #{id}",
     "durationMillisecondsShort": "{value}ms",
     "durationSecondsShort": "{value}s",
     "durationMinutesShort": "{value}m",

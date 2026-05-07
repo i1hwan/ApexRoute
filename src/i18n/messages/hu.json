@@ -2491,6 +2491,7 @@
     "age": "Életkor",
     "requests": "Kérések",
     "connection": "Csatlakozás",
+    "connectionFallback": "Account #{id}",
     "durationMillisecondsShort": "{value}ms",
     "durationSecondsShort": "{value}s",
     "durationMinutesShort": "{value}m",

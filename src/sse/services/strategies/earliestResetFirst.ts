@@ -104,9 +104,25 @@ export interface SelectionTrace {
   allExcluded: AllExcludedResult | null;
 }
 
+// Anthropic prompt-cache TTL is 5 minutes sliding (refreshed on each cache
+// hit at no extra cost). Affinity window matches that exactly so a session's
+// cached prefix stays warm for the whole window. See
+// .sisyphus/plans/limits-dashboard-polish.md §1.1 for librarian-confirmed
+// pricing/TTL semantics.
 const SESSION_AFFINITY_WINDOW_MS = 5 * 60 * 1000;
 const SCORE_TIE_EPSILON = 1e-9;
 const MIN_USABLE_REMAINING_PCT = 5;
+
+// Smart-affinity continuation viability tunables (Oracle bg_79458ad3, plan v8).
+// MIN floor sits 3× above the 5% hard-exclusion cliff so we break before
+// hitting Q<5%. HEAVY_GAP combines a multiplicative ratio AND an absolute
+// delta to avoid misfire near zero (e.g. bound=20, alt=61 trips 3× alone but
+// the urgency difference is too small to justify a cache write). Cooldown
+// prevents oscillation between two close-pressure accounts.
+const MIN_AFFINITY_REMAINING_PCT = 15;
+const HEAVY_GAP_FACTOR = 3;
+const MIN_HEAVY_GAP_ABSOLUTE_DELTA = 250;
+const AFFINITY_HEURISTIC_BREAK_COOLDOWN_MS = 60_000;
 
 // v7 burn-rate pressure score range is [Q × URGENCY_FLOOR, Q × URGENCY_CAP] = [5, 10000].
 // Q < 5 is hard-excluded upstream by scoreSession/WeeklyTrack (kind:"excluded").
@@ -418,7 +434,42 @@ export function candidateComparator(a: ScoredCandidate, b: ScoredCandidate): num
   return a.conn.id.localeCompare(b.conn.id);
 }
 
-export function isAffinityValid(conn: ConnectionLike, sessionId: string | null): AffinityValidity {
+// Per-session timestamp of the most recent heuristic affinity break.
+// In-memory only; bounded GC at 1000 entries / 10 minutes to prevent
+// unbounded growth in long-running processes. See plan v8 §5 anti-regression.
+const heuristicBreakHistory = new Map<string, number>();
+const HEURISTIC_BREAK_GC_MAX_ENTRIES = 1000;
+const HEURISTIC_BREAK_GC_MAX_AGE_MS = 10 * 60 * 1000;
+
+function isHeuristicBreakInCooldown(sessionId: string | null): boolean {
+  if (!sessionId) return false;
+  const last = heuristicBreakHistory.get(sessionId);
+  if (last === undefined) return false;
+  return Date.now() - last < AFFINITY_HEURISTIC_BREAK_COOLDOWN_MS;
+}
+
+function recordHeuristicBreak(sessionId: string | null): void {
+  if (!sessionId) return;
+  heuristicBreakHistory.set(sessionId, Date.now());
+  if (heuristicBreakHistory.size > HEURISTIC_BREAK_GC_MAX_ENTRIES) {
+    const cutoff = Date.now() - HEURISTIC_BREAK_GC_MAX_AGE_MS;
+    for (const [sid, ts] of heuristicBreakHistory) {
+      if (ts < cutoff) heuristicBreakHistory.delete(sid);
+    }
+  }
+}
+
+// Test-only: reset the heuristic break history. Used by unit tests to
+// avoid cross-test pollution of the module-level cooldown map.
+export function __resetAffinityHeuristicCooldownForTesting(): void {
+  heuristicBreakHistory.clear();
+}
+
+export function isAffinityValid(
+  conn: ConnectionLike,
+  sessionId: string | null,
+  scoredAlternatives?: ScoredCandidate[]
+): AffinityValidity {
   if (conn.isActive === false) return { valid: false, reason: "inactive" };
 
   if (conn.rateLimitedUntil) {
@@ -451,6 +502,53 @@ export function isAffinityValid(conn: ConnectionLike, sessionId: string | null):
   const w = scoreWeeklyTrack(conn.id);
   if (w.kind === "excluded") return { valid: false, reason: w.reason };
 
+  // Smart continuation viability: only checked when caller passes pre-scored
+  // alternatives (selectByEarliestResetFirst does). Existing tests that call
+  // isAffinityValid(conn, sessionId) without alternatives skip this entirely
+  // — backwards compatible.
+  if (scoredAlternatives && scoredAlternatives.length > 0) {
+    const usable = scoredAlternatives.filter((sc) => !sc.excluded && sc.conn.id !== conn.id);
+    if (usable.length === 0) {
+      // No alt to switch to — staying is the only choice. Don't break.
+      return { valid: true };
+    }
+
+    // Heuristic break #1: bound's minimum known remaining track is below the
+    // safety floor AND a usable alternative exists (cooldown gates oscillation).
+    const knownPcts: number[] = [];
+    if (s.kind === "known") knownPcts.push(s.remainingPct);
+    if (w.kind === "known") knownPcts.push(w.remainingPct);
+    if (knownPcts.length > 0) {
+      const minKnownPct = Math.min(...knownPcts);
+      if (minKnownPct < MIN_AFFINITY_REMAINING_PCT && !isHeuristicBreakInCooldown(sessionId)) {
+        recordHeuristicBreak(sessionId);
+        return { valid: false, reason: "affinity_break_low_quota" };
+      }
+    }
+
+    // Heuristic break #2: a usable alt is so much more urgent that one cache
+    // write is cheaper than 5 more minutes of suboptimal routing. Combine
+    // multiplicative factor with absolute delta to neutralize misfire near zero.
+    const boundScored = scoreAccount(conn);
+    const boundScore = boundScored.score ?? 0;
+    const bestAltScore = Math.max(...usable.map((sc) => sc.score ?? 0));
+
+    let isHeavyGap: boolean;
+    if (boundScore <= 0) {
+      // Negative bound score means heavy backoff penalty already wiped its
+      // viability; any positive usable alt is strictly better.
+      isHeavyGap = bestAltScore > 0;
+    } else {
+      isHeavyGap =
+        bestAltScore >= boundScore * HEAVY_GAP_FACTOR &&
+        bestAltScore >= boundScore + MIN_HEAVY_GAP_ABSOLUTE_DELTA;
+    }
+    if (isHeavyGap && !isHeuristicBreakInCooldown(sessionId)) {
+      recordHeuristicBreak(sessionId);
+      return { valid: false, reason: "affinity_break_p1_too_urgent" };
+    }
+  }
+
   return { valid: true };
 }
 
@@ -482,18 +580,22 @@ export function selectByEarliestResetFirst(
   candidates: ConnectionLike[],
   sessionId: string | null
 ): { selected: ConnectionLike } | AllExcludedResult {
+  // Score every candidate up front so the smart-affinity viability check can
+  // compare bound vs alternatives without re-running scoreAccount on the same
+  // pool. Existing fall-through path (no affinity) reuses the same scored list.
+  const scored: ScoredCandidate[] = candidates.map((c) => scoreAccount(c));
+
   if (sessionId) {
     const boundId = getSessionConnection(sessionId);
     if (boundId) {
       const bound = candidates.find((c) => c.id === boundId);
-      const affinity = bound ? isAffinityValid(bound, sessionId) : null;
+      const affinity = bound ? isAffinityValid(bound, sessionId, scored) : null;
       if (bound && affinity?.valid === true) {
         return { selected: bound };
       }
     }
   }
 
-  const scored: ScoredCandidate[] = candidates.map((c) => scoreAccount(c));
   const usable = scored.filter((s) => !s.excluded);
 
   if (usable.length === 0) return buildAllExcluded(scored);

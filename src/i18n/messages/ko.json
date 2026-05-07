@@ -2491,6 +2491,7 @@
     "age": "나이",
     "requests": "요청사항",
     "connection": "연결",
+    "connectionFallback": "계정 #{id}",
     "durationMillisecondsShort": "{value}ms",
     "durationSecondsShort": "{value}s",
     "durationMinutesShort": "{value}m",

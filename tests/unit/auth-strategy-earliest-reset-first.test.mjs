@@ -20,6 +20,7 @@ const {
   W_WEEKLY_SEC,
   URGENCY_CAP,
   URGENCY_FLOOR,
+  __resetAffinityHeuristicCooldownForTesting,
 } = earliestResetFirst;
 
 function expectedPressure(Q, sec, W) {
@@ -110,6 +111,7 @@ const claudeConn = (id, extras = {}) => ({
 
 test.beforeEach(() => {
   resetCacheState();
+  __resetAffinityHeuristicCooldownForTesting();
 });
 
 // ─── 1. Stepwise boundary tests ──────────────────────────────────────────────
@@ -924,4 +926,203 @@ test("V7-direct: pressure() exact values for known fixtures", () => {
   assert.equal(pressure(80, W_SESSION_SEC, W_SESSION_SEC), 80);
   assert.equal(pressure(100, null, W_SESSION_SEC), 10000);
   assert.equal(pressure(100, null, W_WEEKLY_SEC), 10000);
+});
+
+// ─── 15. v8 smart affinity continuation viability ────────────────────────────
+
+test("SA-1: bound healthy + alt only 1.5x score → keep affinity (no break)", () => {
+  // bound: Q=50, t=W_S (mid pressure). alt: Q=75, t=W_S (1.5× ratio, fails 3× test)
+  seedClaudeAccount("bound", {
+    sessionRem: 50,
+    sessionResetSec: W_SESSION_SEC,
+    weeklyRem: 80,
+    weeklyResetSec: W_WEEKLY_SEC,
+  });
+  seedClaudeAccount("alt", {
+    sessionRem: 75,
+    sessionResetSec: W_SESSION_SEC,
+    weeklyRem: 80,
+    weeklyResetSec: W_WEEKLY_SEC,
+  });
+  const sessionId = "sa-1-session";
+  touchSession(sessionId, "bound");
+  const result = selectByEarliestResetFirst([claudeConn("bound"), claudeConn("alt")], sessionId);
+  assert.equal(result.selected.id, "bound", "1.5× alt should not break 3× threshold");
+});
+
+test("SA-2: alt 4x score AND >250 abs delta → break (heuristic_break_p1_too_urgent)", () => {
+  // bound: Q=20, t=W_S → pressure=20. alt: Q=20, t=W_S/100 → pressure=20×100=2000.
+  // ratio=100×, delta=1980 → triggers both factor and absolute delta gates
+  seedClaudeAccount("bound", {
+    sessionRem: 20,
+    sessionResetSec: W_SESSION_SEC,
+    weeklyRem: 80,
+    weeklyResetSec: W_WEEKLY_SEC,
+  });
+  seedClaudeAccount("alt", {
+    sessionRem: 20,
+    sessionResetSec: 180, // W_SESSION_SEC / 100 = 180s
+    weeklyRem: 80,
+    weeklyResetSec: W_WEEKLY_SEC,
+  });
+  const sessionId = "sa-2-session";
+  touchSession(sessionId, "bound");
+  const result = selectByEarliestResetFirst([claudeConn("bound"), claudeConn("alt")], sessionId);
+  assert.equal(result.selected.id, "alt", "4×+ alt with large abs delta should break affinity");
+});
+
+test("SA-3: bound 10% session AND alt usable → break (heuristic_break_low_quota)", () => {
+  // bound session=10% < MIN_AFFINITY_REMAINING_PCT=15 → break.
+  // alt is given a strictly higher score so the post-break sort picks it
+  // deterministically (we're testing that break HAPPENS, not the tie-break).
+  seedClaudeAccount("bound", {
+    sessionRem: 10,
+    sessionResetSec: W_SESSION_SEC,
+    weeklyRem: 80,
+    weeklyResetSec: W_WEEKLY_SEC,
+  });
+  seedClaudeAccount("alt", {
+    sessionRem: 100,
+    sessionResetSec: W_SESSION_SEC / 4,
+    weeklyRem: 100,
+    weeklyResetSec: W_WEEKLY_SEC,
+  });
+  const sessionId = "sa-3-session";
+  touchSession(sessionId, "bound");
+  const result = selectByEarliestResetFirst([claudeConn("bound"), claudeConn("alt")], sessionId);
+  assert.equal(result.selected.id, "alt", "bound below 15% with healthy alt should break");
+});
+
+test("SA-4: bound 10% session + NO usable alt → keep affinity (Oracle edge rule)", () => {
+  // bound has low quota but only candidate
+  seedClaudeAccount("bound", {
+    sessionRem: 10,
+    sessionResetSec: W_SESSION_SEC,
+    weeklyRem: 80,
+    weeklyResetSec: W_WEEKLY_SEC,
+  });
+  const sessionId = "sa-4-session";
+  touchSession(sessionId, "bound");
+  const result = selectByEarliestResetFirst([claudeConn("bound")], sessionId);
+  assert.equal(result.selected.id, "bound", "no usable alt → stay even with low Q");
+});
+
+test("SA-5/6: cooldown 60s — break, then 30s later same condition → no break (cooldown)", () => {
+  // Use a fresh sessionId per test run so previous SA-3 break doesn't pollute.
+  const sessionId = `sa-5-session-${Math.random().toString(36).slice(2)}`;
+  // alt score must be strictly higher than bound's so the post-break sort
+  // is deterministic (avoids near-tie flakiness when both score ≈ 80).
+  seedClaudeAccount("bound", {
+    sessionRem: 10,
+    sessionResetSec: W_SESSION_SEC,
+    weeklyRem: 80,
+    weeklyResetSec: W_WEEKLY_SEC,
+  });
+  seedClaudeAccount("alt", {
+    sessionRem: 100,
+    sessionResetSec: W_SESSION_SEC / 4,
+    weeklyRem: 100,
+    weeklyResetSec: W_WEEKLY_SEC,
+  });
+  touchSession(sessionId, "bound");
+
+  // First call: cooldown empty → break
+  const r1 = selectByEarliestResetFirst([claudeConn("bound"), claudeConn("alt")], sessionId);
+  assert.equal(r1.selected.id, "alt", "first break: low quota");
+
+  // Re-bind to bound and immediately re-test: cooldown active → keep affinity
+  // even though bound is still 10%
+  touchSession(sessionId, "bound");
+  const r2 = selectByEarliestResetFirst([claudeConn("bound"), claudeConn("alt")], sessionId);
+  assert.equal(r2.selected.id, "bound", "cooldown active: heuristic break suppressed");
+});
+
+test("SA-7: hard exclusion (terminal) bypasses cooldown", () => {
+  const sessionId = `sa-7-session-${Math.random().toString(36).slice(2)}`;
+  seedClaudeAccount("bound", {
+    sessionRem: 80,
+    sessionResetSec: W_SESSION_SEC,
+    weeklyRem: 80,
+    weeklyResetSec: W_WEEKLY_SEC,
+  });
+  seedClaudeAccount("alt", {
+    sessionRem: 80,
+    sessionResetSec: W_SESSION_SEC,
+    weeklyRem: 80,
+    weeklyResetSec: W_WEEKLY_SEC,
+  });
+  touchSession(sessionId, "bound");
+
+  // Bound is terminal → hard exclusion regardless of cooldown
+  const result = selectByEarliestResetFirst(
+    [claudeConn("bound", { testStatus: "expired" }), claudeConn("alt")],
+    sessionId
+  );
+  assert.equal(result.selected.id, "alt", "terminal bypasses any cooldown");
+});
+
+test("SA-8: bound score = 0 (no quota cache) + alt with positive score → break", () => {
+  // bound: no quotaCache entry → scoreAccount returns score=0
+  // alt: real quota → positive score
+  const boundId = `sa-8-bound-${Math.random().toString(36).slice(2)}`;
+  seedClaudeAccount("alt", {
+    sessionRem: 50,
+    sessionResetSec: W_SESSION_SEC,
+    weeklyRem: 80,
+    weeklyResetSec: W_WEEKLY_SEC,
+  });
+  const sessionId = `sa-8-session-${Math.random().toString(36).slice(2)}`;
+  touchSession(sessionId, boundId);
+
+  const result = selectByEarliestResetFirst([claudeConn(boundId), claudeConn("alt")], sessionId);
+  // bound score=0, alt score>0; with score<=0 special case + cooldown empty → break
+  // But wait: in this test bound has Q=undefined → scoreSessionTrack returns
+  // {kind:"missing"}, so the low-Q heuristic only kicks in when kind:"known".
+  // With both tracks missing AND no cache entry, scoreAccount returns score=0.
+  // For score<=0 special case: bestAlt > 0 → break.
+  assert.equal(result.selected.id, "alt", "score<=0 + positive alt → break");
+});
+
+test("SA-9: bound s.kind=missing + w.kind=known low → low-quota check uses weekly only", () => {
+  // bound: no session cache, weekly 10% → applies low-quota check to weekly only.
+  // alt is given a strictly higher score for deterministic post-break sort.
+  seedSingleWeeklyAccount("bound-w-only", "github", {
+    weeklyRem: 10,
+    weeklyResetSec: W_WEEKLY_SEC,
+  });
+  seedClaudeAccount("alt", {
+    sessionRem: 100,
+    sessionResetSec: W_SESSION_SEC / 4,
+    weeklyRem: 100,
+    weeklyResetSec: W_WEEKLY_SEC,
+  });
+  const sessionId = `sa-9-session-${Math.random().toString(36).slice(2)}`;
+  touchSession(sessionId, "bound-w-only");
+
+  const result = selectByEarliestResetFirst(
+    [claudeConn("bound-w-only"), claudeConn("alt")],
+    sessionId
+  );
+  assert.equal(
+    result.selected.id,
+    "alt",
+    "weekly < 15% with usable alt should break (session missing skipped)"
+  );
+});
+
+test("SA-10: isAffinityValid called without scoredAlternatives → backwards compat (no viability check)", () => {
+  // Caller: existing tests that pass (conn, sessionId) without third arg.
+  // Should NOT trigger viability check; only hard exclusions apply.
+  seedClaudeAccount("bound", {
+    sessionRem: 10, // would trigger break IF scored alts were passed
+    sessionResetSec: W_SESSION_SEC,
+    weeklyRem: 80,
+    weeklyResetSec: W_WEEKLY_SEC,
+  });
+  const sessionId = `sa-10-session-${Math.random().toString(36).slice(2)}`;
+  touchSession(sessionId, "bound");
+
+  // Direct call without scoredAlternatives
+  const out = isAffinityValid(claudeConn("bound"), sessionId);
+  assert.equal(out.valid, true, "low-Q without alt list should NOT trigger viability check");
 });
