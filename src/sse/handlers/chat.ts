@@ -53,6 +53,7 @@ import { applyThinkingBudgetSettings } from "@omniroute/open-sse/services/thinki
 import {
   generateSessionId as generateStableSessionId,
   touchSession,
+  bindSessionConnection,
   extractExternalSessionId,
   checkSessionLimit,
   registerKeySession,
@@ -545,7 +546,11 @@ async function handleSingleModelChat(
       }
     }
     if (runtimeOptions.sessionId && body?._omnirouteInternalRequest !== "context-handoff") {
-      touchSession(runtimeOptions.sessionId, credentials.connectionId);
+      bindSessionConnection(runtimeOptions.sessionId, credentials.connectionId, {
+        source: runtimeOptions.emergencyFallbackTried
+          ? "emergency_fallback"
+          : "explicit_post_credential",
+      });
     }
 
     const refreshedCredentials = await checkAndRefreshToken(provider, credentials);

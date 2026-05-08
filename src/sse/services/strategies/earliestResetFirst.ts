@@ -21,11 +21,12 @@
 
 import { getQuotaWindowStatus, isAccountQuotaExhausted } from "@/domain/quotaCache";
 import {
+  bindSessionConnection,
   getSessionConnection,
   getSessionInfo,
-  touchSession,
 } from "@omniroute/open-sse/services/sessionManager.ts";
 import { isTerminalConnectionStatus } from "@/sse/services/accountTerminalStatus";
+import * as log from "@/sse/utils/logger";
 
 interface ConnectionLike {
   id: string;
@@ -500,7 +501,8 @@ export function __resetAffinityHeuristicCooldownForTesting(): void {
 export function isAffinityValid(
   conn: ConnectionLike,
   sessionId: string | null,
-  scoredAlternatives?: ScoredCandidate[]
+  scoredAlternatives?: ScoredCandidate[],
+  provider?: string | null
 ): AffinityValidity {
   if (conn.isActive === false) return { valid: false, reason: "inactive" };
 
@@ -586,9 +588,35 @@ export function isAffinityValid(
         bestAltScore >= boundScore * HEAVY_GAP_FACTOR &&
         bestAltScore >= boundScore + MIN_HEAVY_GAP_ABSOLUTE_DELTA;
     }
-    if (isHeavyGap && !isHeuristicBreakInCooldown(sessionId)) {
+
+    // Cache-sensitive provider gate (Oracle audit ses_1fa7165c0ffeFFU8rjU82y0ItO):
+    // Anthropic Claude OAuth lane uses 5-minute prompt cache (write 1.25x,
+    // read 0.1x). A 147k-token cache rewrite costs ~12.5x what a single read
+    // does; the urgent-alt break would have to be amortised over 12+ reads
+    // in 5 minutes to pay for itself, which a typical chat workload cannot.
+    // For Claude, suppress the urgent-alt break unless the bound is already
+    // non-positive score (genuinely unusable via accumulated backoff/error
+    // penalty) — in that case any positive alt still escapes via the
+    // boundScore <= 0 branch above. Other break paths (terminal, rate_limited,
+    // quota_exhausted, low-quota < 15%, session_expired, affinity_window_passed)
+    // are unaffected. Other providers (codex, github, etc.) keep the
+    // original break behaviour because their cache economics differ.
+    const isCacheSensitive = (provider || "").toLowerCase() === "claude";
+    const allowUrgentBreak = !isCacheSensitive || boundScore <= 0;
+
+    if (isHeavyGap && allowUrgentBreak && !isHeuristicBreakInCooldown(sessionId)) {
       recordHeuristicBreak(sessionId);
       return { valid: false, reason: "affinity_break_p1_too_urgent" };
+    }
+
+    if (isHeavyGap && !allowUrgentBreak) {
+      log.debug("AUTH/affinity", "urgent-alt break suppressed by cache-sensitive gate", {
+        sessionId,
+        provider,
+        boundScore,
+        bestAltScore,
+        gate: "claude_urgent_alt_suppressed",
+      });
     }
   }
 
@@ -621,20 +649,39 @@ function buildAllExcluded(scored: ScoredCandidate[]): AllExcludedResult {
 
 export function selectByEarliestResetFirst(
   candidates: ConnectionLike[],
-  sessionId: string | null
+  sessionId: string | null,
+  provider?: string | null
 ): { selected: ConnectionLike } | AllExcludedResult {
-  // Score every candidate up front so the smart-affinity viability check can
-  // compare bound vs alternatives without re-running scoreAccount on the same
-  // pool. Existing fall-through path (no affinity) reuses the same scored list.
   const scored: ScoredCandidate[] = candidates.map((c) => scoreAccount(c));
 
   if (sessionId) {
     const boundId = getSessionConnection(sessionId);
     if (boundId) {
       const bound = candidates.find((c) => c.id === boundId);
-      const affinity = bound ? isAffinityValid(bound, sessionId, scored) : null;
+      const affinity = bound ? isAffinityValid(bound, sessionId, scored, provider) : null;
       if (bound && affinity?.valid === true) {
+        log.debug("AUTH/affinity", "kept", {
+          sessionId,
+          provider: provider ?? null,
+          boundId,
+          decision: "kept_affinity",
+        });
         return { selected: bound };
+      }
+      if (bound && affinity && affinity.valid === false) {
+        const boundScored = scored.find((sc) => sc.conn.id === boundId);
+        const usableAlts = scored.filter((sc) => !sc.excluded && sc.conn.id !== boundId);
+        const bestAltScore =
+          usableAlts.length > 0 ? Math.max(...usableAlts.map((sc) => sc.score ?? 0)) : null;
+        log.warn("AUTH/affinity", "broken", {
+          sessionId,
+          provider: provider ?? null,
+          oldBound: boundId,
+          decision: "fall_through_break",
+          reason: affinity.reason,
+          boundScore: boundScored?.score ?? null,
+          bestAltScore,
+        });
       }
     }
   }
@@ -646,7 +693,14 @@ export function selectByEarliestResetFirst(
   usable.sort(candidateComparator);
   const selected = usable[0].conn;
 
-  if (sessionId) touchSession(sessionId, selected.id);
+  if (sessionId) {
+    bindSessionConnection(sessionId, selected.id, { source: "fall_through" });
+    log.debug("AUTH/affinity", "fall-through selected", {
+      sessionId,
+      provider: provider ?? null,
+      selected: selected.id,
+    });
+  }
 
   return { selected };
 }

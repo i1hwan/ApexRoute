@@ -4,6 +4,45 @@
 
 ---
 
+## [3.8.7] — 2026-05-08
+
+### 🔒 Routing — session affinity real fix (D1 + D2 + D3)
+
+Production traffic on 3.8.6 / 3.8.5 showed a `feat/limits-dashboard-polish` smart-affinity violation: an `APEXATGNU → GNUMAX` switch fired only 4 seconds after the last successful APEXATGNU request, on the same opencode-supplied `x-session-affinity` header, with both accounts at ~100% quota. The cache rebuilt from scratch (147k token cache_write, cache_read=0). Oracle hard-debug (`ses_1fa7165c0ffeFFU8rjU82y0ItO`) identified three independent design defects, all fixed here.
+
+#### D1 — `x-session-affinity` is now a first-class external session header
+
+`extractExternalSessionId` previously matched only `x-session-id` / `x_session_id` / `x-omniroute-session` / `session-id`, so the stable opencode continuity signal was being silently dropped and the session id was being recomputed from a fingerprint hash of the request body. Any system-prompt or first-user-message drift (sub-agent invocation, dynamic context injection) produced a NEW session id with no bound connection, falling through to score-based selection. The header chain now includes `x-session-affinity` between the generic forms and the OmniRoute-specific alias. Each header source is given its own namespace prefix (`ext:` for the legacy generic forms, `ext-xsa:` for `x-session-affinity`, `ext-omr:` for `x-omniroute-session`) using a hyphen separator so that a legacy generic value of e.g. `xsa:foo` cannot collide with a newer `x-session-affinity: foo` request.
+
+#### D2 — `touchSession` no longer overwrites `connectionId`; `bindSessionConnection` is the single mutation site
+
+The previous `touchSession(sessionId, connectionId)` silently rewrote the bound connection on every call, including the post-credential confirmation in `chat.ts`. This made it impossible to tell from `/api/sessions` whether a session had ever been bound to a different account — the previous binding evidence was always erased by the last write. `touchSession(sessionId)` is now a pure activity update (lastActive, requestCount). All binding mutations go through the new `bindSessionConnection(sessionId, connectionId, { source })` which returns a `BindResult` with five reason states (`no_session_id` / `first_bind` / `no_change` / `rebind_within_window` / `rebind_after_window`). A rebind inside the 5-minute affinity window emits a structured `log.warn("SESSION/affinity", "session rebound within affinity window", { ... })` — that single log line now answers "did affinity break?" definitively. The deprecated 2-arg `touchSession` signature still works as a compat shim with a one-shot deprecation warning, so existing tests keep passing.
+
+#### D3 — Cache-sensitive provider gate on `affinity_break_p1_too_urgent`
+
+`selectByEarliestResetFirst` and `isAffinityValid` now accept an optional `provider` argument, plumbed through from `auth.ts` (which already had the provider in scope). For `provider === "claude"` (Anthropic OAuth lane), the urgent-alt heuristic break is suppressed unless `boundScore <= 0` (genuinely unusable via accumulated backoff/error penalty). Rationale: Claude prompt cache write is 1.25x and read is 0.1x of input cost, so a 147k-token cache rewrite is roughly 12x more expensive than a single read; the urgent-alt break would have to amortise over 12+ reads in 5 minutes to pay for itself, which a typical chat workload cannot. Other break paths (terminal, rate_limited, quota_exhausted, low-quota < 15%, session_expired, affinity_window_passed) are unaffected — only the urgent-alt heuristic is gated. Other providers retain the original break behaviour because their cache economics differ.
+
+#### Trace logging
+
+`selectByEarliestResetFirst` now emits a structured log on every routing decision: `log.debug("AUTH/affinity", "kept", ...)` when affinity is preserved, `log.warn("AUTH/affinity", "broken", ...)` when affinity is broken via heuristic with the bound and best-alt scores attached, and `log.debug("AUTH/affinity", "fall-through selected", ...)` when no session was bound. A single `log.warn` line during production traffic is now the diagnostic signal for "did affinity break?" — combined with the `bindSessionConnection` rebind-within-window warning, the previously invisible silent overwrites are now first-class observable events.
+
+### 📚 Internal Notes
+
+- New unit tests in `tests/unit/session-manager-affinity-headers.test.mjs` (8 tests) cover the new namespace-per-source extraction, header collision avoidance, fallback chain order, and edge cases (empty / whitespace / 64+ char values).
+- New unit tests in `tests/unit/session-manager-binding.test.mjs` (8 tests) cover the `touchSession` activity-only contract, the deprecated 2-arg compat shim, and all five `BindResult.reason` states.
+- Existing `auth-strategy-earliest-reset-first.test.mjs` extended with a `githubConn` fixture helper and a `seedSingleSessionAccount` seed helper. **SA-2** rewritten: the urgent-alt break test now uses GitHub provider so the new Claude gate doesn't apply (the underlying break logic is still asserted, just for a non-cache-sensitive provider). **SA-12** new: Claude bound + 4× alt → break BLOCKED by gate. **SA-13** new: Claude bound score=0 (no quota cache, hence backoff-style unusable) + positive alt → break ALLOWED (gate's escape condition). **SA-14** new: GitHub bound + 4× alt → break ALLOWED (gate is Claude-only).
+- Test count: 2874/2874 PASS (was 2852; +22 net — SA-12 / SA-13 / SA-14 + 9 affinity-header tests (incl. collision-proof) + 10 binding tests (incl. null-first-bind, emergency_fallback)).
+- Version bump 3.8.6 → 3.8.7.
+
+### Plan + Oracle two-stage verification
+
+- Plan: `.sisyphus/plans/session-affinity-real-fix.md`
+- Oracle plan v1 (`ses_1f85345c8ffebTdtpTaQ5aeN8J`): NEEDS_REVISION on 7 items (A defect, B nit, C defect, D defect, E defect, F nit, G nit) → all 7 applied in plan v2.
+- Oracle plan v2 (`ses_1f84ae893ffeTXGq7QBjwfTgzX`): NEEDS_REVISION (narrow) on 5 wording-mismatch items → all 5 applied in plan v3.
+- Oracle implementation audit (`ses_1f83ab6edffecggMOuz5EmDhT1`): NEEDS_REVISION on 4 defects + 1 nit. **Defect A** namespace collision (`ext:xsa:foo` vs `ext:` + raw `xsa:foo`) → moved to hyphenated `ext-xsa:` / `ext-omr:`. **Defect B (critical)** `bindSessionConnection` after `touchSession()` (which creates entry with `connectionId: null`) was classifying as `rebind_within_window` → null oldConnectionId is now `first_bind` and emits no warning. **Defect D** chat.ts emergency-fallback retry produced a within-window alarm for legitimate behavior → new `BindSource = "emergency_fallback"` plumbed from the retry path, alarm suppressed for that source. **Defect H** `require()` lazy-loaded inside try/catch could silently swallow logs in ESM/tsx → static `import * as log from "@/sse/utils/logger"` (no cycle). **Nit E** gate-suppressed urgent-alt now logs `gate: "claude_urgent_alt_suppressed"` at debug for observability. All five fixes applied + new tests for each.
+
+---
+
 ## [3.8.6] — 2026-05-08
 
 ### 🎨 Design Unification
