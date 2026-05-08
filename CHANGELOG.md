@@ -28,8 +28,8 @@ The previous `touchSession(sessionId, connectionId)` silently rewrote the bound 
 
 ### 📚 Internal Notes
 
-- New unit tests in `tests/unit/session-manager-affinity-headers.test.mjs` (8 tests) cover the new namespace-per-source extraction, header collision avoidance, fallback chain order, and edge cases (empty / whitespace / 64+ char values).
-- New unit tests in `tests/unit/session-manager-binding.test.mjs` (8 tests) cover the `touchSession` activity-only contract, the deprecated 2-arg compat shim, and all five `BindResult.reason` states.
+- New unit tests in `tests/unit/session-manager-affinity-headers.test.mjs` (9 tests) cover the new namespace-per-source extraction, header collision avoidance (incl. legacy values that look-namespaced like `xsa:foo`), fallback chain order, and edge cases (empty / whitespace / 64+ char values).
+- New unit tests in `tests/unit/session-manager-binding.test.mjs` (10 tests) cover the `touchSession` activity-only contract, the deprecated 2-arg compat shim, all five `BindResult.reason` states, the null-`oldConnectionId` first-bind path (Oracle audit defect B), and the `emergency_fallback` rebind suppression (Oracle audit defect D).
 - Existing `auth-strategy-earliest-reset-first.test.mjs` extended with a `githubConn` fixture helper and a `seedSingleSessionAccount` seed helper. **SA-2** rewritten: the urgent-alt break test now uses GitHub provider so the new Claude gate doesn't apply (the underlying break logic is still asserted, just for a non-cache-sensitive provider). **SA-12** new: Claude bound + 4× alt → break BLOCKED by gate. **SA-13** new: Claude bound score=0 (no quota cache, hence backoff-style unusable) + positive alt → break ALLOWED (gate's escape condition). **SA-14** new: GitHub bound + 4× alt → break ALLOWED (gate is Claude-only).
 - Test count: 2874/2874 PASS (was 2852; +22 net — SA-12 / SA-13 / SA-14 + 9 affinity-header tests (incl. collision-proof) + 10 binding tests (incl. null-first-bind, emergency_fallback)).
 - Version bump 3.8.6 → 3.8.7.

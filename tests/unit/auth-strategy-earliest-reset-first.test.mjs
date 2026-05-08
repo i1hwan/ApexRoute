@@ -976,7 +976,11 @@ test("SA-2: alt 4x score AND >250 abs delta → break for non-Claude provider (g
   // ratio=100×, delta=1980 → triggers both factor and absolute delta gates.
   // Uses GitHub provider so the Claude cache-sensitive gate (PR #28 D3)
   // does NOT suppress the urgent-alt break. Claude-blocked variant lives in SA-12.
-  // Bound seeded as github so quotaCache lookup matches the conn.provider field.
+  // Note: setQuotaCache stores a provider tag alongside the per-connectionId
+  // entry but the lookup key for scoreSessionTrack/scoreWeeklyTrack is the
+  // connectionId only — the "github" string is descriptive metadata, not part
+  // of the cache key. The Claude gate decision is driven entirely by the
+  // selectByEarliestResetFirst third argument below.
   seedSingleSessionAccount("bound-gh", "github", {
     sessionRem: 20,
     sessionResetSec: W_SESSION_SEC,
