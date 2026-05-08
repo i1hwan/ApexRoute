@@ -14,6 +14,20 @@ test("isOverallWindowName matches canonical session/weekly labels with or withou
   assert.equal(isOverallWindowName("weekly (7d)"), true);
 });
 
+test("isOverallWindowName matches no-space canonical forms (parity with pickWindow)", () => {
+  // Oracle audit (ses_1fbb494e4ffe7BxOUFFzU8g6dm — defect B): pickWindow accepts
+  // both "weekly (7d)" and "weekly(7d)" via startsWith(`${windowKey}(`), so
+  // isOverallWindowName MUST accept the same no-space canonical forms or the
+  // parent !isOverallWindowName filter in index.tsx will let "weekly(7d)" leak
+  // into per-model rendering AND OverallQuotaRow simultaneously. The parity
+  // invariant itself is enforced by the dedicated cross-function test below,
+  // independent of any specific implementation line.
+  assert.equal(isOverallWindowName("session(5h)"), true);
+  assert.equal(isOverallWindowName("weekly(7d)"), true);
+  assert.equal(isOverallWindowName("Session(5h)"), true);
+  assert.equal(isOverallWindowName("Weekly(7d)"), true);
+});
+
 test("isOverallWindowName returns false for per-model variants so they render as per-model bars", () => {
   assert.equal(isOverallWindowName("weekly Sonnet"), false);
   assert.equal(isOverallWindowName("weekly Sonnet (7d)"), false);
@@ -58,4 +72,29 @@ test("pickWindow handles empty / missing-name entries gracefully", () => {
   ];
   assert.equal(pickWindow(quotas, "session")?.remainingPercentage, 30);
   assert.equal(pickWindow(quotas, "weekly"), null);
+});
+
+test("pickWindow / isOverallWindowName parity: every name pickWindow accepts must be marked overall", () => {
+  // Cross-function invariant guard. If pickWindow returns a quota for windowKey,
+  // isOverallWindowName(quota.name) MUST return true; otherwise the parent
+  // filter would render that same quota as a per-model bar (double-render).
+  const cases = [
+    { name: "session", key: "session" },
+    { name: "Session", key: "session" },
+    { name: "session (5h)", key: "session" },
+    { name: "session(5h)", key: "session" },
+    { name: "weekly", key: "weekly" },
+    { name: "Weekly", key: "weekly" },
+    { name: "weekly (7d)", key: "weekly" },
+    { name: "weekly(7d)", key: "weekly" },
+  ];
+  for (const { name, key } of cases) {
+    const picked = pickWindow([{ name, remainingPercentage: 50 }], key);
+    assert.ok(picked, `pickWindow must accept ${name} for windowKey ${key}`);
+    assert.equal(
+      isOverallWindowName(name),
+      true,
+      `isOverallWindowName must agree on ${name} (pickWindow accepted it)`
+    );
+  }
 });

@@ -467,7 +467,7 @@ export default function ProviderLimits() {
           <button
             onClick={refreshAll}
             disabled={refreshingAll}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-bg-subtle border border-border text-text-main text-[13px] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-bg-subtle border border-border text-text-main text-[13px] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           >
             <span
               className={`material-symbols-outlined text-[16px] ${refreshingAll ? "animate-spin" : ""}`}
@@ -630,9 +630,7 @@ export default function ProviderLimits() {
                           return (
                             <div
                               key={i}
-                              className={`flex items-center gap-1.5 min-w-[200px] shrink-0 ${
-                                i > 0 ? "border-l border-border/80 pl-3 ml-1" : ""
-                              }`}
+                              className="flex items-center gap-1.5 min-w-[200px] shrink-0"
                             >
                               {/* Model label */}
                               <span
