@@ -56,6 +56,19 @@ A user observed an OpenAI Codex row showing the badge "Quota exhausted" when act
 - `tests/unit/routing-badge-mapping.test.mjs` (9 cases) — `getExcludedI18nKey()` returns the new `Exhausted` / `LowQuota` keys for the right inputs, never the deprecated `Quota` key.
 - `tests/unit/routing-badge-i18n-coverage.test.mjs` (4 cases) — all 32 locale files have both new keys, none retains the deprecated key.
 
+### Apex-compatible Sub-Agent Review (Anthropic Opus 4.7 path)
+
+Real GitHub Copilot reviewer was over weekly quota; OpenAI-routed Oracle sub-agents were unavailable. Performed final pre-merge gate using Anthropic-Opus-primary sub-agents (Metis + Sisyphus-Junior under category `unspecified-high`). Findings:
+
+- **M3 (DEFECT)**: `refreshClaudeOAuthTokenWithRetry` worst case 93s/connection (30s × 3 attempts + 1s + 2s backoff) caused `syncAllProviderLimits` batch to risk reverse-proxy 504 timeouts (nginx default 60s, Cloudflare 100s) for multi-Anthropic-account users — the exact failure mode this PR was designed to handle gracefully. Fixed by introducing `claudeMaxRetries` parameter on `refreshAndUpdateCredentials` / `fetchLiveProviderLimits`. Batch (`syncAllProviderLimits`) now passes `2` (worst case ~62s/connection); per-row interactive refresh keeps the default `3` (user actively waiting).
+- **M1 (NIT, internal API hygiene)**: `toProviderLimitsCacheEntry` ignored `live.usage.fetchedAt` and used `new Date().toISOString()` default. While `mergeIntoResponseBody` already shielded clients (it overwrites `caches` with disk view), the `caches` map returned by `syncAllProviderLimits` to internal callers was misleading. Fixed by forwarding `live.usage.fetchedAt` (when string) into the third argument; undefined falls back to NOW.
+- **2 regression unit tests added**.
+
+### Tests (final)
+
+- 2 cases added in `tests/unit/usage-provider-limits-warnings.test.mjs` (M1 fetchedAt forward + M3 claudeMaxRetries option contract).
+- All other findings from the two sub-agent reviews are NITs deferred to follow-up PRs (`AmberRefreshBadge` ISO-string tooltip humanization, `getLogConfig()` dead `||` fallback, `withTimeout` zombie-fetch cancellation, etc.).
+
 ### Versions
 
 - gateway: 3.8.7 → 3.8.8

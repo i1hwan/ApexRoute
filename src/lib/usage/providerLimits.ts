@@ -103,8 +103,21 @@ type RefreshOutcome = {
   warning?: RefreshWarning;
 };
 
+/**
+ * Refresh credentials for a single connection.
+ *
+ * `claudeMaxRetries` caps the Claude OAuth retry count. The default is 3
+ * (worst case ~93s: 30s × 3 attempts + 1s + 2s backoff). The batch path
+ * (`syncAllProviderLimits`) passes 2 to keep worst case under typical
+ * reverse-proxy read-timeouts (60-100s for nginx/Cloudflare). Per-row
+ * interactive refresh keeps the default 3 — the user is actively waiting
+ * and a 90s ceiling is acceptable for a single connection.
+ *
+ * Oracle PR #29 review M3.
+ */
 async function refreshAndUpdateCredentials(
-  connection: ProviderConnectionLike
+  connection: ProviderConnectionLike,
+  claudeMaxRetries = 3
 ): Promise<RefreshOutcome> {
   const executor = getExecutor(connection.provider);
   const credentials = {
@@ -123,7 +136,9 @@ async function refreshAndUpdateCredentials(
   if (connection.provider === "claude" && connection.refreshToken) {
     const classified: ClaudeRefreshClassification = await refreshClaudeOAuthTokenWithRetry(
       connection.refreshToken,
-      console
+      console,
+      null,
+      claudeMaxRetries
     );
     if (classified.status === "transient") {
       return {
@@ -321,7 +336,11 @@ function buildTransientFromCache(
   };
 }
 
-export async function fetchLiveProviderLimits(connectionId: string): Promise<FetchLiveResult> {
+export async function fetchLiveProviderLimits(
+  connectionId: string,
+  options: { claudeMaxRetries?: number } = {}
+): Promise<FetchLiveResult> {
+  const { claudeMaxRetries = 3 } = options;
   let connection = (await getProviderConnectionById(connectionId)) as ProviderConnectionLike | null;
   if (!connection) {
     throw withStatus(new Error("Connection not found"), 404);
@@ -349,7 +368,7 @@ export async function fetchLiveProviderLimits(connectionId: string): Promise<Fet
       let conn = connection as ProviderConnectionLike;
       let wasRefreshed = false;
 
-      const result = await refreshAndUpdateCredentials(conn);
+      const result = await refreshAndUpdateCredentials(conn, claudeMaxRetries);
       conn = result.connection;
       wasRefreshed = result.refreshed;
 
@@ -473,8 +492,10 @@ export async function syncAllProviderLimits(
     const chunk = connections.slice(i, i + concurrency);
     const results = await Promise.allSettled(
       chunk.map(async (connection) => {
-        const live = await fetchLiveProviderLimits(connection.id);
-        const cache = toProviderLimitsCacheEntry(live.usage, source);
+        const live = await fetchLiveProviderLimits(connection.id, { claudeMaxRetries: 2 });
+        const fetchedAt =
+          typeof live.usage.fetchedAt === "string" ? live.usage.fetchedAt : undefined;
+        const cache = toProviderLimitsCacheEntry(live.usage, source, fetchedAt);
         return {
           connectionId: connection.id,
           cache,
