@@ -373,17 +373,27 @@ export async function fetchLiveProviderLimits(connectionId: string): Promise<Fet
 
   try {
     result = await fetchUsageWithContext(proxyConfig);
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const errMessage =
+      error instanceof Error ? error.message : typeof error === "string" ? error : "";
+    const errCode =
+      error && typeof error === "object" && "code" in error
+        ? (error as { code?: unknown }).code
+        : undefined;
+    const errCauseCode =
+      error && typeof error === "object" && "cause" in error
+        ? ((error as { cause?: { code?: unknown } }).cause as { code?: unknown } | undefined)?.code
+        : undefined;
     const isThrownNetworkError =
-      error?.message === "fetch failed" ||
-      error?.code === "PROXY_UNREACHABLE" ||
-      error?.code === "UND_ERR_CONNECT_TIMEOUT" ||
-      error?.cause?.code === "ECONNREFUSED";
+      errMessage === "fetch failed" ||
+      errCode === "PROXY_UNREACHABLE" ||
+      errCode === "UND_ERR_CONNECT_TIMEOUT" ||
+      errCauseCode === "ECONNREFUSED";
 
     if (proxyConfig && isThrownNetworkError) {
       console.warn(
         `[ProviderLimits] Proxy fetch threw for ${connectionId}, retrying without proxy:`,
-        error?.message
+        errMessage
       );
       result = await fetchUsageWithContext(null);
     } else {

@@ -47,10 +47,10 @@ A user observed an OpenAI Codex row showing the badge "Quota exhausted" when act
 
 ### Tests
 
-- `tests/unit/logger-transport-fallback.test.mjs` (12 cases).
+- `tests/unit/logger-transport-fallback.test.mjs` — `verifyLogDirWritable` writable / TARGET_IS_DIR / ENOENT / EACCES (skipped on root) / cleanup-across-50-iterations; `ensureLogDir` tri-state; `initLogRotation` disabled / enabled / not_writable+detail; existing-file append-mode probe; APP_LOG_LEVEL sanitization.
 - `tests/unit/v1-routes-no-init-translators.test.mjs`.
 - `tests/unit/anthropic-refresh-classification.test.mjs` (19 cases) — 200 ok / 200 soft_failure / 400 invalid_grant / unauthorized_client / revoked / bad_request / 401 plain / 401 invalid_grant override / 403 / 408 / 429 / 500 / 503 / network / 418-uncommon, plus 3 legacy back-compat cases.
-- `tests/unit/anthropic-refresh-retry.test.mjs` (6 cases) — ok-no-retry / permanent-no-retry / transient×3-then-ok / transient×3-exhausted / transient-then-permanent / network×3-exhausted (each with backoff timing assertion).
+- `tests/unit/anthropic-refresh-retry.test.mjs` (6 cases) — ok-no-retry / permanent-no-retry / transient×3-then-ok / transient×3-exhausted / transient-then-permanent / network×3-exhausted (call-count and result-status assertions).
 - `tests/unit/usage-provider-limits-warnings.test.mjs` — `mergeIntoResponseBody` warnings preservation, RefreshWarning shape contract.
 - `tests/unit/provider-limits-ui-warning.test.mjs` (6 cases) — UI state machine: warning preserves quotaData, success clears warning, permanent 401 clears stale amber, refreshAll full-replace, idempotency.
 - `tests/unit/routing-badge-mapping.test.mjs` (9 cases) — `getExcludedI18nKey()` returns the new `Exhausted` / `LowQuota` keys for the right inputs, never the deprecated `Quota` key.

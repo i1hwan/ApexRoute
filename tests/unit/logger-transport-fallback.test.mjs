@@ -165,3 +165,36 @@ test("initLogRotation returns not_writable with structured detail when target is
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test(
+  "verifyLogDirWritable rejects an existing read-only target file (Oracle PR #29 review A1)",
+  { skip: isRoot ? "root bypasses 0o400" : false },
+  () => {
+    const dir = tmp();
+    const target = join(dir, "app.log");
+    writeFileSync(target, "old content\n");
+    chmodSync(target, 0o400);
+    try {
+      const result = verifyLogDirWritable(target);
+      assert.equal(result.ok, false);
+      if (!result.ok) {
+        assert.ok(
+          result.reason === "EACCES" || result.reason === "EROFS",
+          `expected EACCES or EROFS, got ${result.reason}`
+        );
+      }
+    } finally {
+      chmodSync(target, 0o600);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+);
+
+test("verifyLogDirWritable accepts an existing writable target file (append-mode open)", () => {
+  const dir = tmp();
+  const target = join(dir, "app.log");
+  writeFileSync(target, "existing content\n");
+  const result = verifyLogDirWritable(target);
+  assert.deepEqual(result, { ok: true });
+  rmSync(dir, { recursive: true, force: true });
+});

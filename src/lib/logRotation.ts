@@ -79,23 +79,53 @@ export type WritableProbeFailReason =
 export type WritableProbeResult = { ok: true } | { ok: false; reason: WritableProbeFailReason };
 
 /**
- * Verify that the parent directory of `logFilePath` accepts a real one-byte
- * write. Catches read-only mounts (EROFS), missing permissions (EACCES),
- * full filesystems (ENOSPC), and the case where the target path itself is
- * a directory (TARGET_IS_DIR — pino/file would error on first write).
+ * Verify that the log destination is actually writable.
  *
- * Uses exclusive create (`openSync(probe, "wx")`) to avoid clobbering any
- * concurrent file. Cleans up the probe in `finally` whether write
- * succeeded or failed.
+ * Two-stage check (Oracle PR #29 review):
+ *   (1) If `logFilePath` exists and is a directory → TARGET_IS_DIR.
+ *   (2) If `logFilePath` exists as a regular file → open it in append mode
+ *       (`"a"`) and close it. This catches the case where an old `app.log`
+ *       was created with read-only permissions (EACCES on `pino/file`'s
+ *       first write, which would kill the transport worker).
+ *   (3) Otherwise probe the parent directory with an exclusive-create
+ *       one-byte write. Catches read-only mounts (EROFS), missing
+ *       permissions (EACCES), full filesystems (ENOSPC), missing parent
+ *       (ENOENT), wrong-type parent (ENOTDIR).
+ *
+ * Probe cleanup is `try/finally`-guaranteed: fd is closed and the probe
+ * file is unlinked whether the write succeeded or failed.
  */
 export function verifyLogDirWritable(logFilePath: string): WritableProbeResult {
+  let targetExistsAsFile = false;
   try {
     if (existsSync(logFilePath)) {
       const st = statSync(logFilePath);
       if (st.isDirectory()) return { ok: false, reason: "TARGET_IS_DIR" };
+      if (st.isFile()) targetExistsAsFile = true;
     }
   } catch {
-    // ignore — fall through to write probe
+    // ignore — fall through to probe
+  }
+
+  if (targetExistsAsFile) {
+    let appendFd: number | null = null;
+    try {
+      appendFd = openSync(logFilePath, "a");
+      return { ok: true };
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException)?.code ?? "UNKNOWN";
+      const reason: WritableProbeFailReason =
+        code === "EACCES" || code === "EROFS" || code === "ENOSPC" ? code : "UNKNOWN";
+      return { ok: false, reason };
+    } finally {
+      if (appendFd !== null) {
+        try {
+          closeSync(appendFd);
+        } catch {
+          /* best-effort */
+        }
+      }
+    }
   }
 
   const dir = dirname(logFilePath);

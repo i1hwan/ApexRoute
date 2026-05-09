@@ -93,6 +93,13 @@ export default function ProviderLimits() {
 
   const lastFetchTimeRef = useRef({});
   const staleProbeRef = useRef({});
+  // Per-connection epoch: the timestamp at which the LAST successful row
+  // refresh resolved. When a `refreshAll` POST response arrives carrying a
+  // warning for connId X, we ignore that warning if X's last row success
+  // is more recent than the moment refreshAll was started — that row has
+  // already proven the warning is stale.
+  const refreshAllStartedAtRef = useRef<number>(0);
+  const lastRowSuccessAtRef = useRef<Record<string, number>>({});
 
   const fetchConnections = useCallback(async () => {
     try {
@@ -257,6 +264,7 @@ export default function ProviderLimits() {
           ...prev,
           [connectionId]: new Date().toISOString(),
         }));
+        lastRowSuccessAtRef.current[connectionId] = Date.now();
         void refreshRoutingOnly();
       } catch (error) {
         setErrors((prev) => ({
@@ -286,6 +294,8 @@ export default function ProviderLimits() {
   const refreshAll = useCallback(async () => {
     if (refreshingAll) return;
     setRefreshingAll(true);
+    const startedAt = Date.now();
+    refreshAllStartedAtRef.current = startedAt;
     try {
       const response = await fetch("/api/usage/provider-limits", { method: "POST" });
       if (!response.ok) {
@@ -298,7 +308,18 @@ export default function ProviderLimits() {
       const connectionList = await fetchConnections();
       applyCachedQuotaState(connectionList, data.caches || {});
       setErrors(data.errors || {});
-      setWarnings((data.warnings as Record<string, RefreshWarning> | undefined) || {});
+      const incomingWarnings = (data.warnings as Record<string, RefreshWarning> | undefined) || {};
+      // Drop incoming warnings for connections whose row-level refresh
+      // succeeded after this refreshAll was started — those rows have
+      // already proven the warning stale (Oracle PR #29 review B6).
+      const filteredWarnings: Record<string, RefreshWarning> = {};
+      for (const [connId, warning] of Object.entries(incomingWarnings)) {
+        const lastSuccess = lastRowSuccessAtRef.current[connId] ?? 0;
+        if (lastSuccess <= startedAt) {
+          filteredWarnings[connId] = warning;
+        }
+      }
+      setWarnings(filteredWarnings);
       if (data.routing && typeof data.routing === "object") {
         setRoutingByConnection(data.routing as Record<string, RoutingPreviewEntry>);
       }

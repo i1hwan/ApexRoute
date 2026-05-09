@@ -32,8 +32,25 @@ import { getAppLogLevel } from "@/lib/logEnv";
 
 const isDev = process.env.NODE_ENV !== "production";
 
+const VALID_PINO_LEVELS = new Set(["fatal", "error", "warn", "info", "debug", "trace", "silent"]);
+
+function sanitizeLogLevel(raw: string, fallback: string): string {
+  const lower = raw.toLowerCase();
+  if (VALID_PINO_LEVELS.has(lower)) return lower;
+  try {
+    process.stderr.write(
+      `[logger] APP_LOG_LEVEL="${raw}" is not a valid pino level; falling back to "${fallback}".\n`
+    );
+  } catch {
+    /* best-effort */
+  }
+  return fallback;
+}
+
+const SAFE_LOG_LEVEL = sanitizeLogLevel(getAppLogLevel(isDev ? "debug" : "info"), "info");
+
 const baseConfig: pino.LoggerOptions = {
-  level: getAppLogLevel(isDev ? "debug" : "info"),
+  level: SAFE_LOG_LEVEL,
   base: { service: "omniroute" },
   timestamp: pino.stdTimeFunctions.isoTime,
   formatters: {
@@ -51,7 +68,22 @@ function getTransportCompatibleConfig(): pino.LoggerOptions {
   return Object.keys(safeFormatters).length > 0 ? { ...rest, formatters: safeFormatters } : rest;
 }
 
-const fallbackLogger: pino.Logger = pino(baseConfig, pino.destination({ dest: 1, sync: true }));
+function buildFallbackLogger(): pino.Logger {
+  try {
+    return pino(baseConfig, pino.destination({ dest: 1, sync: true }));
+  } catch {
+    try {
+      process.stderr.write(
+        "[logger] eager fallback construction failed; using minimal default-config logger.\n"
+      );
+    } catch {
+      /* best-effort */
+    }
+    return pino({ level: "info" }, pino.destination({ dest: 1, sync: true }));
+  }
+}
+
+const fallbackLogger: pino.Logger = buildFallbackLogger();
 
 let swapped = false;
 
