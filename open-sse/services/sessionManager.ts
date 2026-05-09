@@ -141,6 +141,38 @@ export function touchSession(
   deprecatedConnectionId: string | null = null
 ): void {
   if (!sessionId) return;
+  // When the deprecated 2-arg form is used, the binding decision must see
+  // the PRE-touch lastActive — otherwise bindSessionConnection always
+  // observes "within affinity window" because we just refreshed lastActive
+  // to Date.now() above. That would misclassify a rebind on a session
+  // idle >5 min as `rebind_within_window` and fire the diagnostic alarm.
+  // Order: bind first (which itself updates lastActive on success), then
+  // increment requestCount to preserve the touch contract for legacy
+  // callers. If no deprecated connectionId is passed, the normal
+  // touch-only path runs as before.
+  // Oracle audit ses_1fa7165c0ffeFFU8rjU82y0ItO + Copilot PR #28 R3-1.
+  if (deprecatedConnectionId) {
+    if (!warnedAboutTouchSessionDeprecatedArg) {
+      warnedAboutTouchSessionDeprecatedArg = true;
+      log.warn(
+        "SESSION",
+        "touchSession(sessionId, connectionId) is deprecated; switch to bindSessionConnection(...)",
+        { sessionId, connectionIdSuffix: deprecatedConnectionId.slice(-8) }
+      );
+    }
+    // Preserve the original 1-touch == 1-request semantics: only increment
+    // requestCount if an entry already existed before this call, since
+    // bindSessionConnection's first_bind branch already sets it to 1.
+    const hadExistingEntry = sessions.has(sessionId);
+    bindSessionConnection(sessionId, deprecatedConnectionId, {
+      source: "explicit_post_credential",
+    });
+    if (hadExistingEntry) {
+      const after = sessions.get(sessionId);
+      if (after) after.requestCount++;
+    }
+    return;
+  }
   const existing = sessions.get(sessionId);
   if (existing) {
     existing.lastActive = Date.now();
@@ -151,19 +183,6 @@ export function touchSession(
       lastActive: Date.now(),
       requestCount: 1,
       connectionId: null,
-    });
-  }
-  if (deprecatedConnectionId) {
-    if (!warnedAboutTouchSessionDeprecatedArg) {
-      warnedAboutTouchSessionDeprecatedArg = true;
-      log.warn(
-        "SESSION",
-        "touchSession(sessionId, connectionId) is deprecated; switch to bindSessionConnection(...)",
-        { sessionId, connectionIdSuffix: deprecatedConnectionId.slice(-8) }
-      );
-    }
-    bindSessionConnection(sessionId, deprecatedConnectionId, {
-      source: "explicit_post_credential",
     });
   }
 }

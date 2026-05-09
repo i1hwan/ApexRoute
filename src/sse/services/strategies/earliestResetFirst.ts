@@ -21,7 +21,6 @@
 
 import { getQuotaWindowStatus, isAccountQuotaExhausted } from "@/domain/quotaCache";
 import {
-  bindSessionConnection,
   getSessionConnection,
   getSessionInfo,
 } from "@omniroute/open-sse/services/sessionManager.ts";
@@ -704,8 +703,15 @@ export function selectByEarliestResetFirst(
   usable.sort(candidateComparator);
   const selected = usable[0].conn;
 
+  // Strategy-level binding has been removed (Copilot PR #28 R3-2). The
+  // caller (chat.ts:548 → bindSessionConnection with source resolved from
+  // runtimeOptions.emergencyFallbackTried) is responsible for the actual
+  // session binding decision so the source is accurate. If the strategy
+  // bound here with a hard-coded "fall_through" source, the emergency-
+  // fallback alarm suppression in bindSessionConnection would never apply
+  // because that first bind happens BEFORE the post-credential bind and
+  // would always be a within-window rebind with the wrong source.
   if (sessionId) {
-    bindSessionConnection(sessionId, selected.id, { source: "fall_through" });
     log.debug("AUTH/affinity", "fall-through selected", {
       sessionId,
       provider: provider ?? null,

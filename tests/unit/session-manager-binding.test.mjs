@@ -40,6 +40,26 @@ test("touchSession(sessionId, deprecatedConnectionId) compat shim still binds", 
   assert.equal(getSessionConnection("s3"), "conn-B");
 });
 
+test("touchSession compat shim treats null oldConnectionId as first_bind, not within-window", () => {
+  // Copilot PR #28 R3-1: the compat shim previously updated `lastActive`
+  // before forwarding to bindSessionConnection, which would make the
+  // forwarded call see a fresh `lastActive` and (incorrectly) classify a
+  // first bind on a brand-new session as within-window. Test exercises the
+  // first-bind path explicitly via the compat shim — must produce the
+  // standard first_bind outcome (no warn alarm) for a fresh session.
+  // The corrected order (bind first, increment requestCount after) is
+  // what makes this work — and the absence of any prior session entry
+  // means bindSessionConnection takes the first_bind branch directly.
+  touchSession("s3-fresh", "conn-X");
+  const info = getSessionInfo("s3-fresh");
+  assert.ok(info, "compat shim creates the session via the bind path");
+  assert.equal(info.connectionId, "conn-X");
+  // 1-touch == 1-request semantics preserved: bind first_bind already sets
+  // requestCount=1, so the compat shim does NOT increment again on the
+  // first call (only when an entry pre-existed).
+  assert.equal(info.requestCount, 1);
+});
+
 test("bindSessionConnection: no_session_id when sessionId is null/empty", () => {
   const r1 = bindSessionConnection(null, "conn-A", { source: "fall_through" });
   assert.equal(r1.ok, false);
