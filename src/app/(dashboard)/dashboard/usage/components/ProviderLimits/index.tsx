@@ -20,8 +20,16 @@ import { pickMaskedDisplayValue } from "@/shared/utils/maskEmail";
 import RoutingBadge, { type RoutingPreviewEntry } from "./RoutingBadge";
 import RoutingTransparencyBanner from "./RoutingTransparencyBanner";
 import AutoRefreshControl from "./AutoRefreshControl";
+import AmberRefreshBadge, { type RefreshTransientReason } from "./AmberRefreshBadge";
 import QuotaVisualization, { isOverallWindowName } from "./QuotaVisualization";
 import { getBarColor } from "./quotaColors";
+
+interface RefreshWarning {
+  kind: "refresh_transient";
+  reason: RefreshTransientReason;
+  cause?: string;
+  since: string;
+}
 
 const LS_GROUP_BY = "omniroute:limits:groupBy";
 const LS_EXPANDED_GROUPS = "omniroute:limits:expandedGroups";
@@ -58,6 +66,7 @@ export default function ProviderLimits() {
   const [quotaData, setQuotaData] = useState({});
   const [loading, setLoading] = useState({});
   const [errors, setErrors] = useState({});
+  const [warnings, setWarnings] = useState<Record<string, RefreshWarning>>({});
   const [lastRefreshedAt, setLastRefreshedAt] = useState<Record<string, string>>({});
   const [refreshingAll, setRefreshingAll] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
@@ -180,11 +189,46 @@ export default function ProviderLimits() {
               ...prev,
               [connectionId]: { quotas: [], message: errorMsg },
             }));
+            setWarnings((prev) => {
+              if (!(connectionId in prev)) return prev;
+              const next = { ...prev };
+              delete next[connectionId];
+              return next;
+            });
             return;
           }
           throw new Error(`HTTP ${response.status}: ${errorMsg}`);
         }
         const data = await response.json();
+
+        if (data.warning && data.warning.kind === "refresh_transient") {
+          setWarnings((prev) => ({ ...prev, [connectionId]: data.warning as RefreshWarning }));
+          if (
+            data.quotas &&
+            Array.isArray(data.quotas) === false &&
+            typeof data.quotas === "object"
+          ) {
+            const parsedQuotas = parseQuotaData(provider, data);
+            setQuotaData((prev) => ({
+              ...prev,
+              [connectionId]: {
+                quotas: parsedQuotas,
+                plan: data.plan || null,
+                message: data.message || null,
+                raw: data,
+              },
+            }));
+          }
+          return;
+        }
+
+        setWarnings((prev) => {
+          if (!(connectionId in prev)) return prev;
+          const next = { ...prev };
+          delete next[connectionId];
+          return next;
+        });
+
         const parsedQuotas = parseQuotaData(provider, data);
 
         // T13: If resetAt already passed but provider still returned stale cumulative usage,
@@ -219,6 +263,12 @@ export default function ProviderLimits() {
           ...prev,
           [connectionId]: error.message || "Failed to fetch quota",
         }));
+        setWarnings((prev) => {
+          if (!(connectionId in prev)) return prev;
+          const next = { ...prev };
+          delete next[connectionId];
+          return next;
+        });
       } finally {
         setLoading((prev) => ({ ...prev, [connectionId]: false }));
       }
@@ -248,6 +298,7 @@ export default function ProviderLimits() {
       const connectionList = await fetchConnections();
       applyCachedQuotaState(connectionList, data.caches || {});
       setErrors(data.errors || {});
+      setWarnings((data.warnings as Record<string, RefreshWarning> | undefined) || {});
       if (data.routing && typeof data.routing === "object") {
         setRoutingByConnection(data.routing as Record<string, RoutingPreviewEntry>);
       }
@@ -588,6 +639,12 @@ export default function ProviderLimits() {
                         </Badge>
                       </span>
                       <RoutingBadge entry={routingByConnection[conn.id]} />
+                      {warnings[conn.id] ? (
+                        <AmberRefreshBadge
+                          reason={warnings[conn.id].reason}
+                          since={warnings[conn.id].since}
+                        />
+                      ) : null}
                       <span className="text-[11px] leading-none text-text-muted">
                         {config.label}
                       </span>

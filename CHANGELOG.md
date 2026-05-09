@@ -18,10 +18,28 @@ Pino's `pino/file` transport runs inside a `thread-stream` worker. When the dest
 - **Dockerfile preflight**: `/app/data/logs/application` created explicitly with write permissions in the runner stage. Documented for future non-root variants (`USER node` would require `chown -R node:node /app/data` first).
 - **`initTranslators()` residue removed from seven `/v1/*` routes**: extending the original PR #453/#450 fix that only covered `/v1/responses/route.ts`. The translator registry is bootstrapped exactly once at module load via `open-sse/translator/index.ts`; route-level re-init was a known worker-death trigger. A static unit test (`tests/unit/v1-routes-no-init-translators.test.mjs`) prevents reintroduction.
 
+#### Anthropic OAuth refresh transient failure replaces dashboard gauges with red "Error 0%" (Issue 2)
+
+When Anthropic OAuth refresh failed transiently (429, 5xx, network), `refreshClaudeOAuthToken` collapsed all errors to `null`, `default.ts::refreshCredentials` returned `null`, `providerLimits.ts` threw 401, `errors[connId]` was populated, and the dashboard's red error block replaced the entire row — including the cached gauges. Auto-recovers on next sync cycle, but UX during transient periods loses all signal.
+
+- **Discriminated-union classification** (`tokenRefresh.ts`): new `refreshClaudeOAuthTokenClassified()` returns `{ status: "ok" | "transient" | "permanent" }`. The `"ok"` shape preserves the legacy `{ accessToken, refreshToken?, expiresIn? }` contract for upstream consumers (existing `refreshClaudeOAuthToken()` retained unchanged for back-compat — it now wraps the classified path and folds non-ok into `null`). Classifier handles 200 with error body / missing `access_token` (`soft_failure_200`); 400/401/403 + body tokens (`invalid_grant` / `revoked_token` / `unauthorized_client` mapped to specific permanent reasons); plain 400/401/403 (conservative `bad_request` / `unauthorized` / `forbidden`); 408/429/5xx (transient `timeout` / `rate_limited` / `upstream_5xx`); fetch throw (`network`); other statuses (`unknown_permanent`).
+- **Retry wrapper** (`tokenRefresh.ts`): new `refreshClaudeOAuthTokenWithRetry()` retries only `transient` (existing `refreshWithRetry` cannot — it treats any truthy result as success). Backoff: 1s before 2nd attempt, 2s before 3rd (matches `attempt * 1000`). Each attempt wrapped in `withTimeout(REFRESH_TIMEOUT_MS=30000)` so a hanging fetch becomes transient timeout. Permanent and ok short-circuit. Circuit breaker integrates only on exhausted transient (permanent ≠ "provider unstable" — user must re-auth).
+- **Graceful path in `providerLimits.ts`**: Claude branch in `refreshAndUpdateCredentials` calls the retry wrapper directly. On `transient`, returns `{ connection, refreshed: false, warning: { kind: "refresh_transient", reason, since } }` with NO throw. New `FetchLiveResult.persist: false` invariant — synthetic transient responses (cached snapshot OR `{ quotas: null, message, source: "no_cache_pending_refresh" }` placeholder) are NEVER written to the cache, so the real `fetchedAt` and snapshot are preserved across the transient period.
+- **`syncAllProviderLimits` returns `{ caches, errors, warnings }` parallel maps**: transient → fulfilled with warning, permanent → rejected with error. Only persistable results write to disk (`setProviderLimitsCacheBatch` skips synthetic).
+- **API responses extended**: `POST /api/usage/provider-limits` body now includes `warnings: Record<connId, RefreshWarning>` alongside `errors`. `GET /api/usage/[connectionId]` returns 200 with `usage.warning` for transient (was 401), 401 for permanent (unchanged).
+- **Dashboard `ProviderLimits/index.tsx` keeps gauges visible on warning**: new `warnings` state, parallel to `errors`. `refreshAll` POST handler full-replaces both maps (server-authoritative). `fetchQuota` row refresh: warning sets `warnings[connId]` without touching `quotaData`; success/401/other-error paths all clear `warnings[connId]` so amber + red never coexist.
+- **New `AmberRefreshBadge` component** rendered next to plan/RoutingBadge — separate visual layer from `QuotaProgressBar.staleAfterReset` (which means "gauge reset window passed", not "refresh transient failed"). i18n keys for en + ko (`refreshTransientBadge`, `refreshTransientTooltip`, 5 reason labels). Other locales fall back to next-intl's missing-key handling.
+
+Scope: **Anthropic only**. Other OAuth providers (Codex, Cursor, GitHub Copilot, Antigravity, Kimi Coding, Kilo Code, Cline) retain existing null-on-error behavior — addressed in follow-up PRs as needed.
+
 ### Tests
 
-- `tests/unit/logger-transport-fallback.test.mjs` (12 cases) — `verifyLogDirWritable` writable / TARGET_IS_DIR / ENOENT / EACCES (skipped on root) / cleanup-across-50-iterations; `ensureLogDir` tri-state; `initLogRotation` disabled / enabled / not_writable+detail.
-- `tests/unit/v1-routes-no-init-translators.test.mjs` — static guard scanning all `/v1*` route files.
+- `tests/unit/logger-transport-fallback.test.mjs` (12 cases).
+- `tests/unit/v1-routes-no-init-translators.test.mjs`.
+- `tests/unit/anthropic-refresh-classification.test.mjs` (19 cases) — 200 ok / 200 soft_failure / 400 invalid_grant / unauthorized_client / revoked / bad_request / 401 plain / 401 invalid_grant override / 403 / 408 / 429 / 500 / 503 / network / 418-uncommon, plus 3 legacy back-compat cases.
+- `tests/unit/anthropic-refresh-retry.test.mjs` (6 cases) — ok-no-retry / permanent-no-retry / transient×3-then-ok / transient×3-exhausted / transient-then-permanent / network×3-exhausted (each with backoff timing assertion).
+- `tests/unit/usage-provider-limits-warnings.test.mjs` — `mergeIntoResponseBody` warnings preservation, RefreshWarning shape contract.
+- `tests/unit/provider-limits-ui-warning.test.mjs` (6 cases) — UI state machine: warning preserves quotaData, success clears warning, permanent 401 clears stale amber, refreshAll full-replace, idempotency.
 
 ### Versions
 
