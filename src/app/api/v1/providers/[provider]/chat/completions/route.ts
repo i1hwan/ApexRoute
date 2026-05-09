@@ -1,24 +1,13 @@
 import { CORS_ORIGIN } from "@/shared/utils/cors";
 import { buildClientRawRequest, handleChat } from "@/sse/handlers/chat";
-import { initTranslators } from "@omniroute/open-sse/translator/index.ts";
 import { errorResponse } from "@omniroute/open-sse/utils/error.ts";
 import { HTTP_STATUS } from "@omniroute/open-sse/config/constants.ts";
 import { getRegistryEntry } from "@omniroute/open-sse/config/providerRegistry.ts";
 import { providerChatCompletionSchema } from "@/shared/validation/schemas";
 import { isValidationFailure, validateBody } from "@/shared/validation/helpers";
 
-let initialized = false;
+// initTranslators() removed — see /v1/responses/route.ts (#450, PR #29).
 
-async function ensureInitialized() {
-  if (!initialized) {
-    await initTranslators();
-    initialized = true;
-  }
-}
-
-/**
- * Handle CORS preflight
- */
 export async function OPTIONS() {
   return new Response(null, {
     headers: {
@@ -44,8 +33,6 @@ export async function POST(request, { params }) {
 
   // Resolve provider alias/id for model prefix checks
   const providerAlias = providerEntry.alias || providerEntry.id;
-
-  await ensureInitialized();
 
   // Clone request with provider-prefixed model
   let rawBody;

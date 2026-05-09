@@ -1,16 +1,7 @@
 import { CORS_ORIGIN } from "@/shared/utils/cors";
 import { handleChat } from "@/sse/handlers/chat";
-import { initTranslators } from "@omniroute/open-sse/translator/index.ts";
 
-let initialized = false;
-
-async function ensureInitialized() {
-  if (!initialized) {
-    await initTranslators();
-    initialized = true;
-    console.log("[SSE] Translators initialized for /v1/responses/*");
-  }
-}
+// initTranslators() removed — see /v1/responses/route.ts (#450, PR #29).
 
 export async function OPTIONS() {
   return new Response(null, {
@@ -28,6 +19,5 @@ export async function OPTIONS() {
  * arbitrary Responses suffixes all the way to the upstream provider.
  */
 export async function POST(request) {
-  await ensureInitialized();
   return await handleChat(request);
 }

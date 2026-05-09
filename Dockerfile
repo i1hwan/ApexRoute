@@ -62,7 +62,11 @@ ENV DATA_DIR=/app/data
 RUN apt-get update \
   && apt-get install -y --no-install-recommends libsecret-1-0 ca-certificates \
   && rm -rf /var/lib/apt/lists/*
-RUN mkdir -p /app/data
+RUN mkdir -p /app/data /app/data/logs/application \
+  && chmod -R u+w /app/data
+# NOTE: current image runs as root (no USER directive). If a future change
+# introduces USER node (or similar non-root uid), add `chown -R node:node
+# /app/data` BEFORE the USER switch so file logging continues to work.
 
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/static ./.next/static

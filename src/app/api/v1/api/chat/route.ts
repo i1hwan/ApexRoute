@@ -1,17 +1,8 @@
 import { CORS_ORIGIN } from "@/shared/utils/cors";
 import { handleChat } from "@/sse/handlers/chat";
-import { initTranslators } from "@omniroute/open-sse/translator/index.ts";
 import { transformToOllama } from "@omniroute/open-sse/utils/ollamaTransform.ts";
 
-let initialized = false;
-
-async function ensureInitialized() {
-  if (!initialized) {
-    await initTranslators();
-    initialized = true;
-    console.log("[SSE] Translators initialized");
-  }
-}
+// initTranslators() removed — see /v1/responses/route.ts (#450, PR #29).
 
 export async function OPTIONS() {
   return new Response(null, {
@@ -24,8 +15,6 @@ export async function OPTIONS() {
 }
 
 export async function POST(request) {
-  await ensureInitialized();
-
   const clonedReq = request.clone();
   let modelName = "llama3.2";
   try {

@@ -4,6 +4,32 @@
 
 ---
 
+## [3.8.8] — 2026-05-09
+
+### 🛡️ Production resilience — three independent fixes
+
+#### Logger transport worker death (Issue 1)
+
+Pino's `pino/file` transport runs inside a `thread-stream` worker. When the destination path was unwritable in the Docker runtime (default `process.cwd()/logs/application/app.log` resolved to `/app/logs/...` which the Dockerfile never created), the worker exited on first write. After that, every subsequent `log.info`/`log.warn`/`log.error` call threw `Error: the worker has exited`, producing 4× uncaughtException stack traces per chat request. Two compounding root causes addressed:
+
+- **Default log path realignment**: now resolves to `<DATA_DIR>/logs/application/app.log` where `DATA_DIR = env.DATA_DIR ?? process.cwd()/data`. This falls under the Dockerfile-created writable volume (`/app/data`) in production and a `.gitignore`d local dir in dev. `APP_LOG_FILE_PATH` env override unchanged.
+- **Writability preflight**: `initLogRotation()` now returns a tri-state result `{ enabled, reason, detail? }`. New `verifyLogDirWritable()` performs a one-byte exclusive-create write probe (catches EACCES, EROFS, ENOENT, ENOSPC, ENOTDIR, EEXIST_FILE) and rejects targets that are themselves directories (TARGET_IS_DIR — `pino/file` would error on first write). Probe cleanup is `try/finally`-guaranteed.
+- **Eager fallback + worker-exit Proxy**: `logger.ts` builds a sync stdout-only fallback logger eagerly at module init (so the catch path never has to construct one). The active logger is wrapped in a Proxy that intercepts log methods, `level` get/set, `child()`, and pass-through methods (`flush`, `bindings`, `isLevelEnabled`). On first `Error("the worker has exited")` (or `ERR_WORKER_OUT_OF_MEMORY` / `ERR_WORKER_NOT_RUNNING`), a module-scoped `swapped` flag is set and ALL subsequent log calls — including those from children created BEFORE the swap — route to the fallback. A single `process.stderr.write` notice; subsequent calls silent. Worker-exit errors are NEVER re-thrown to caller code.
+- **Dockerfile preflight**: `/app/data/logs/application` created explicitly with write permissions in the runner stage. Documented for future non-root variants (`USER node` would require `chown -R node:node /app/data` first).
+- **`initTranslators()` residue removed from seven `/v1/*` routes**: extending the original PR #453/#450 fix that only covered `/v1/responses/route.ts`. The translator registry is bootstrapped exactly once at module load via `open-sse/translator/index.ts`; route-level re-init was a known worker-death trigger. A static unit test (`tests/unit/v1-routes-no-init-translators.test.mjs`) prevents reintroduction.
+
+### Tests
+
+- `tests/unit/logger-transport-fallback.test.mjs` (12 cases) — `verifyLogDirWritable` writable / TARGET_IS_DIR / ENOENT / EACCES (skipped on root) / cleanup-across-50-iterations; `ensureLogDir` tri-state; `initLogRotation` disabled / enabled / not_writable+detail.
+- `tests/unit/v1-routes-no-init-translators.test.mjs` — static guard scanning all `/v1*` route files.
+
+### Versions
+
+- gateway: 3.8.7 → 3.8.8
+- docs/openapi.yaml: 3.8.7 → 3.8.8
+
+---
+
 ## [3.8.7] — 2026-05-08
 
 ### 🔒 Routing — session affinity real fix (D1 + D2 + D3)
