@@ -30,9 +30,12 @@ test("extractExternalSessionId namespaces prevent cross-header collisions", () =
 
 test("extractExternalSessionId namespace is collision-proof against legacy values that LOOK namespaced", () => {
   // A legacy generic header carrying a value like "xsa:foo" must NOT collide
-  // with the new x-session-affinity: "foo" namespace. The hyphenated prefix
-  // form (ext-xsa) prevents this because no legacy generic raw value can
-  // begin with the hyphen-prefix marker.
+  // with the new x-session-affinity: "foo" namespace. The collision proof
+  // comes from the namespaced sources using DIFFERENT prefixes than the
+  // generic ones (ext-xsa: / ext-omr: vs ext:), so the resulting strings
+  // differ regardless of the raw value: legacy generic "xsa:foo" becomes
+  // "ext:xsa:foo" while new affinity "foo" becomes "ext-xsa:foo" — distinct
+  // prefix character ('-' vs ':' after "ext"), distinct internal id.
   const legacyLooksNamespaced = extractExternalSessionId(
     fakeHeaders({ "x-session-id": "xsa:foo" })
   );

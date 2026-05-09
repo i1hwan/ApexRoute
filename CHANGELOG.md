@@ -24,7 +24,7 @@ The previous `touchSession(sessionId, connectionId)` silently rewrote the bound 
 
 #### Trace logging
 
-`selectByEarliestResetFirst` now emits a structured log on every routing decision: `log.debug("AUTH/affinity", "kept", ...)` when affinity is preserved, `log.warn("AUTH/affinity", "broken", ...)` when affinity is broken via heuristic with the bound and best-alt scores attached, and `log.debug("AUTH/affinity", "fall-through selected", ...)` when no session was bound. A single `log.warn` line during production traffic is now the diagnostic signal for "did affinity break?" — combined with the `bindSessionConnection` rebind-within-window warning, the previously invisible silent overwrites are now first-class observable events.
+`selectByEarliestResetFirst` now emits a structured log on every routing decision. `log.debug("AUTH/affinity", "kept", ...)` when affinity is preserved. `log.warn("AUTH/affinity", "broken", ...)` ONLY when affinity is broken via the heuristic rules (`affinity_break_low_quota` or `affinity_break_p1_too_urgent`) — those are the diagnostic alarm cases. Affinity invalidations for expected reasons (`session_expired`, `affinity_window_passed`, `rate_limited`, `terminal`, `quota_exhausted_unknown_reset`, `inactive`, track-excluded variants) emit `log.debug("AUTH/affinity", "broken", ...)` instead so production warn-level logs stay focused on real anomalies. `log.debug("AUTH/affinity", "fall-through selected", ...)` when no session was bound. Combined with the `bindSessionConnection` rebind-within-window warning, the previously invisible silent overwrites are now first-class observable events.
 
 ### 📚 Internal Notes
 

@@ -30,8 +30,12 @@ test("touchSession with no existing entry creates a session with connectionId: n
 
 test("touchSession(sessionId, deprecatedConnectionId) compat shim still binds", () => {
   // Compat path: legacy 2-arg call must result in the same binding outcome
-  // as bindSessionConnection. The deprecated warning is best-effort and not
-  // asserted here (logger may be unavailable in this test environment).
+  // as bindSessionConnection. The deprecation warning is intentionally not
+  // asserted here to keep the test decoupled from logger side effects;
+  // exercising the binding contract is the primary signal we need at the
+  // unit level. (sessionManager statically imports the logger, so the
+  // warning IS emitted in production — verifying the emission would be
+  // the job of a logger-stub integration test.)
   touchSession("s3", "conn-B");
   assert.equal(getSessionConnection("s3"), "conn-B");
 });

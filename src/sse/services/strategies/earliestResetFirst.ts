@@ -673,7 +673,18 @@ export function selectByEarliestResetFirst(
         const usableAlts = scored.filter((sc) => !sc.excluded && sc.conn.id !== boundId);
         const bestAltScore =
           usableAlts.length > 0 ? Math.max(...usableAlts.map((sc) => sc.score ?? 0)) : null;
-        log.warn("AUTH/affinity", "broken", {
+        // Heuristic-break reasons are the diagnostic alarm signal — they
+        // indicate the smart-affinity logic actively chose to break a
+        // healthy binding, which is rare and warrants production attention.
+        // Non-heuristic reasons (window expiry, hard exclusions like terminal
+        // / rate_limited / quota_exhausted_unknown_reset, inactive, track-
+        // excluded) are EXPECTED affinity invalidations during normal
+        // routing and should not pollute warn-level production logs.
+        const isHeuristicBreak =
+          affinity.reason === "affinity_break_low_quota" ||
+          affinity.reason === "affinity_break_p1_too_urgent";
+        const logLevel = isHeuristicBreak ? "warn" : "debug";
+        log[logLevel]("AUTH/affinity", "broken", {
           sessionId,
           provider: provider ?? null,
           oldBound: boundId,
