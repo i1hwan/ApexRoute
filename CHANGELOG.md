@@ -32,6 +32,19 @@ When Anthropic OAuth refresh failed transiently (429, 5xx, network), `refreshCla
 
 Scope: **Anthropic only**. Other OAuth providers (Codex, Cursor, GitHub Copilot, Antigravity, Kimi Coding, Kilo Code, Cline) retain existing null-on-error behavior — addressed in follow-up PRs as needed.
 
+#### Routing badge mislabeled "Low quota" as "Quota exhausted" (Issue 3)
+
+`RoutingBadge.tsx` collapsed two semantically distinct routing-strategy outcomes onto the same i18n key `routingPriorityExcludedQuota` ("Quota exhausted"):
+
+- **True 429-driven exhaustion** (`reason === "quota_exhausted_unknown_reset"`) — account is actually depleted.
+- **Routing-only threshold exclusion** (`reason` contains `<5%`) — account works fine, just deprioritized below the routing-strategy floor.
+
+A user observed an OpenAI Codex row showing the badge "Quota exhausted" when actual session was at 58% remaining and weekly was at 2% remaining (low but non-zero). The badge wording suggested the account was unusable when in reality it was just routing-deprioritized. Fix:
+
+- `getExcludedI18nKey()` mapping in `RoutingBadge.tsx` now emits `routingPriorityExcludedExhausted` for the true 429 case and `routingPriorityExcludedLowQuota` for the `<5%` threshold case. The two are visually identical for now (both use the existing red error-style badge variant) but their text is distinct: "Quota exhausted" vs "Low quota".
+- `en.json` + `ko.json` got distinct hand-written translations. The other 30 locale files have the same key structure but use English fallback (`"Quota exhausted"` / `"Low quota"`) — explicit user-scope decision: keep this PR's i18n surface minimal; localized translations are a follow-up i18n PR concern, not a bug-fix concern.
+- The deprecated `routingPriorityExcludedQuota` key is removed from all 32 locale files — a static unit test enforces both the presence of the new keys and the absence of the old key.
+
 ### Tests
 
 - `tests/unit/logger-transport-fallback.test.mjs` (12 cases).
@@ -40,6 +53,8 @@ Scope: **Anthropic only**. Other OAuth providers (Codex, Cursor, GitHub Copilot,
 - `tests/unit/anthropic-refresh-retry.test.mjs` (6 cases) — ok-no-retry / permanent-no-retry / transient×3-then-ok / transient×3-exhausted / transient-then-permanent / network×3-exhausted (each with backoff timing assertion).
 - `tests/unit/usage-provider-limits-warnings.test.mjs` — `mergeIntoResponseBody` warnings preservation, RefreshWarning shape contract.
 - `tests/unit/provider-limits-ui-warning.test.mjs` (6 cases) — UI state machine: warning preserves quotaData, success clears warning, permanent 401 clears stale amber, refreshAll full-replace, idempotency.
+- `tests/unit/routing-badge-mapping.test.mjs` (9 cases) — `getExcludedI18nKey()` returns the new `Exhausted` / `LowQuota` keys for the right inputs, never the deprecated `Quota` key.
+- `tests/unit/routing-badge-i18n-coverage.test.mjs` (4 cases) — all 32 locale files have both new keys, none retains the deprecated key.
 
 ### Versions
 
