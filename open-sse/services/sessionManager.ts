@@ -7,6 +7,8 @@
 
 import { createHash } from "node:crypto";
 
+import * as log from "@/sse/utils/logger";
+
 interface SessionEntry {
   createdAt: number;
   lastActive: number;
@@ -111,24 +113,192 @@ export function generateSessionId(
   return createHash("sha256").update(fingerprint).digest("hex").slice(0, 16);
 }
 
+// Affinity binding window — must match earliestResetFirst.SESSION_AFFINITY_WINDOW_MS.
+// Duplicated here as a constant rather than imported to avoid a circular dependency
+// (earliestResetFirst already imports from this module). PR #28 invariant — keep
+// in lockstep with the strategy module.
+const SESSION_AFFINITY_WINDOW_MS = 5 * 60 * 1000;
+
+let warnedAboutTouchSessionDeprecatedArg = false;
+
 /**
- * Touch or create a session
+ * Touch a session (activity update only).
+ *
+ * Updates `lastActive` and increments `requestCount`. CREATES a new session
+ * entry if one did not exist (with `connectionId: null`). DOES NOT mutate
+ * `connectionId` on existing entries — that is reserved for
+ * `bindSessionConnection()` so binding mutations are explicit and traceable.
+ *
+ * Backwards-compat overload: a few legacy call sites and tests still pass a
+ * second `connectionId` argument. When seen, this function emits a one-shot
+ * structured warning and forwards to `bindSessionConnection` so the binding
+ * still happens but the caller is flagged for migration.
+ *
+ * Oracle audit ses_1fa7165c0ffeFFU8rjU82y0ItO + ses_1f85345c8ffebTdtpTaQ5aeN8J.
  */
-export function touchSession(sessionId: string | null, connectionId: string | null = null): void {
+export function touchSession(
+  sessionId: string | null,
+  deprecatedConnectionId: string | null = null
+): void {
   if (!sessionId) return;
+  // When the deprecated 2-arg form is used, the binding decision must see
+  // the PRE-touch lastActive — otherwise bindSessionConnection always
+  // observes "within affinity window" because we just refreshed lastActive
+  // to Date.now() above. That would misclassify a rebind on a session
+  // idle >5 min as `rebind_within_window` and fire the diagnostic alarm.
+  // Order: bind first (which itself updates lastActive on success), then
+  // increment requestCount to preserve the touch contract for legacy
+  // callers. If no deprecated connectionId is passed, the normal
+  // touch-only path runs as before.
+  // Oracle audit ses_1fa7165c0ffeFFU8rjU82y0ItO + Copilot PR #28 R3-1.
+  if (deprecatedConnectionId) {
+    if (!warnedAboutTouchSessionDeprecatedArg) {
+      warnedAboutTouchSessionDeprecatedArg = true;
+      log.warn(
+        "SESSION",
+        "touchSession(sessionId, connectionId) is deprecated; switch to bindSessionConnection(...)",
+        { sessionId, connectionIdSuffix: deprecatedConnectionId.slice(-8) }
+      );
+    }
+    // Preserve the original 1-touch == 1-request semantics: only increment
+    // requestCount if an entry already existed before this call, since
+    // bindSessionConnection's first_bind branch already sets it to 1.
+    const hadExistingEntry = sessions.has(sessionId);
+    bindSessionConnection(sessionId, deprecatedConnectionId, {
+      source: "explicit_post_credential",
+    });
+    if (hadExistingEntry) {
+      const after = sessions.get(sessionId);
+      if (after) after.requestCount++;
+    }
+    return;
+  }
   const existing = sessions.get(sessionId);
   if (existing) {
     existing.lastActive = Date.now();
     existing.requestCount++;
-    if (connectionId) existing.connectionId = connectionId;
   } else {
     sessions.set(sessionId, {
       createdAt: Date.now(),
       lastActive: Date.now(),
       requestCount: 1,
-      connectionId,
+      connectionId: null,
     });
   }
+}
+
+export type BindReason =
+  | "no_session_id"
+  | "first_bind"
+  | "no_change"
+  | "rebind_within_window"
+  | "rebind_after_window";
+
+export interface BindResult {
+  ok: boolean;
+  reason: BindReason;
+  oldConnectionId: string | null;
+  newConnectionId: string | null;
+}
+
+export type BindSource =
+  | "affinity_kept"
+  | "fall_through"
+  | "explicit_post_credential"
+  | "emergency_fallback";
+
+/**
+ * Bind (or rebind) a session to a connection.
+ *
+ * This is the ONLY function that mutates `SessionEntry.connectionId`. Every
+ * binding mutation carries a declared `source` so production logs can answer
+ * "why did this session move from APEXA to GNUMAX?" — the previous
+ * implementation silently overwrote on every `touchSession()` call, erasing
+ * the original binding evidence (Oracle audit ses_1fa7165c0ffeFFU8rjU82y0ItO).
+ *
+ * Behaviour:
+ * - `sessionId` null/empty → ok:false, reason: "no_session_id"
+ * - no existing entry → create with `connectionId`, reason: "first_bind"
+ * - existing.connectionId === connectionId → no mutation, reason: "no_change"
+ * - existing.connectionId !== connectionId AND within the affinity window
+ *   (lastActive within 5 minutes) → mutate + reason: "rebind_within_window"
+ *   AND emit `log.warn` (production alarm signal — this should be rare and
+ *   only happen when a heuristic break or hard exclusion triggered)
+ * - existing.connectionId !== connectionId AND after the affinity window →
+ *   mutate + reason: "rebind_after_window" (debug-level, expected)
+ */
+export function bindSessionConnection(
+  sessionId: string | null,
+  connectionId: string,
+  context: { source: BindSource }
+): BindResult {
+  if (!sessionId) {
+    return { ok: false, reason: "no_session_id", oldConnectionId: null, newConnectionId: null };
+  }
+  const existing = sessions.get(sessionId);
+  const now = Date.now();
+  if (!existing) {
+    sessions.set(sessionId, {
+      createdAt: now,
+      lastActive: now,
+      requestCount: 1,
+      connectionId,
+    });
+    return {
+      ok: true,
+      reason: "first_bind",
+      oldConnectionId: null,
+      newConnectionId: connectionId,
+    };
+  }
+  const oldConnectionId = existing.connectionId;
+  if (oldConnectionId === connectionId) {
+    existing.lastActive = now;
+    return {
+      ok: true,
+      reason: "no_change",
+      oldConnectionId,
+      newConnectionId: connectionId,
+    };
+  }
+  // First-bind-after-touch: production flow calls touchSession(sessionId)
+  // first (creating an entry with connectionId: null), then this function
+  // makes the binding decision. Treat null → real conn as first_bind, NOT
+  // rebind_within_window — otherwise every new session's first real bind
+  // would emit a within-window warning, drowning the actual diagnostic
+  // signal we want to see when a live session jumps connections.
+  if (oldConnectionId === null) {
+    existing.connectionId = connectionId;
+    existing.lastActive = now;
+    return {
+      ok: true,
+      reason: "first_bind",
+      oldConnectionId: null,
+      newConnectionId: connectionId,
+    };
+  }
+  const withinWindow = now - existing.lastActive <= SESSION_AFFINITY_WINDOW_MS;
+  existing.connectionId = connectionId;
+  existing.lastActive = now;
+  // Suppress the within-window alarm for legitimate emergency fallback
+  // rebinds (chat.ts retry path). Those are expected behavior, not a
+  // diagnostic anomaly.
+  const isEmergencyFallback = context.source === "emergency_fallback";
+  if (withinWindow && !isEmergencyFallback) {
+    log.warn("SESSION/affinity", "session rebound within affinity window", {
+      sessionId,
+      oldConnectionId,
+      newConnectionId: connectionId,
+      source: context.source,
+      sessionAgeMs: now - existing.createdAt,
+    });
+  }
+  return {
+    ok: true,
+    reason: withinWindow ? "rebind_within_window" : "rebind_after_window",
+    oldConnectionId,
+    newConnectionId: connectionId,
+  };
 }
 
 /**
@@ -264,29 +434,56 @@ export function checkSessionLimit(
 
 /**
  * T04: Extract an external session ID from request headers.
+ *
  * Accepts both hyphenated and underscore forms for Nginx compatibility.
  * Nginx drops headers with underscores by default — use `underscores_in_headers on`
  * in nginx.conf, or use X-Session-Id (hyphenated) which passes cleanly.
  *
- * Ref: sub2api README + PR #634
+ * Header sources are namespaced so the same raw value sent in two different
+ * headers does NOT collide as the same internal session. opencode CLI sends
+ * `x-session-affinity` with its own session id format (e.g. "ses_..."); a
+ * different client sending the same string in `x-session-id` would otherwise
+ * pin to the same bound conn. Per-source prefixes prevent that.
+ *
+ * Trust model: external session IDs share a process-global namespace (no
+ * per-API-key isolation yet). Routing remains constrained by the requesting
+ * key's candidate pool, so cross-tenant routing cannot occur — but two
+ * clients on different keys sending the same header value would observe the
+ * same `lastActive`/`requestCount` counters. API-key-scoped IDs are tracked
+ * as a separate future change.
+ *
+ * Ref: sub2api README + PR #634, Oracle audit ses_1f85345c8ffebTdtpTaQ5aeN8J.
  *
  * @param headers - Request headers (Headers object or plain object with .get())
- * @returns External session ID with "ext:" prefix, or null
+ * @returns External session ID with source-specific prefix, or null
  */
 export function extractExternalSessionId(
   headers: Headers | { get?: (n: string) => string | null } | null | undefined
 ): string | null {
   if (!headers || typeof (headers as Headers).get !== "function") return null;
   const h = headers as Headers;
-  const raw =
-    h.get("x-session-id") ?? // Preferred: hyphenated (passes through Nginx)
-    h.get("x_session_id") ?? // Underscore variant (direct HTTP / custom clients)
-    h.get("x-omniroute-session") ?? // OmniRoute-specific form
-    h.get("session-id") ?? // Bare session-id
-    null;
-  if (!raw || !raw.trim()) return null;
-  // Prefix "ext:" to ensure no collision with internal SHA-256 hash IDs
-  return `ext:${raw.trim().slice(0, 64)}`; // max 64 chars to avoid abuse
+  // Use top-level (single-colon) prefixes outside the legacy `ext:<raw>`
+  // namespace. Earlier draft used `ext:xsa:` which appeared to namespace the
+  // value but was structurally identical to a legacy `x-session-id: xsa:foo`
+  // value (both produced `ext:xsa:foo`). The hyphenated forms `ext-xsa` /
+  // `ext-omr` cannot collide because no legacy generic ID can begin with
+  // those (they would have to contain a hyphen in the prefix, which the
+  // generic chain cannot produce).
+  const sources: Array<readonly [string, string]> = [
+    ["x-session-id", "ext"],
+    ["x_session_id", "ext"],
+    ["x-session-affinity", "ext-xsa"],
+    ["x-omniroute-session", "ext-omr"],
+    ["session-id", "ext"],
+  ];
+  for (const [name, prefix] of sources) {
+    const raw = h.get(name);
+    if (!raw) continue;
+    const trimmed = raw.trim();
+    if (!trimmed) continue;
+    return `${prefix}:${trimmed.slice(0, 64)}`;
+  }
+  return null;
 }
 
 // ─── Internal Helpers ───────────────────────────────────────────────────────

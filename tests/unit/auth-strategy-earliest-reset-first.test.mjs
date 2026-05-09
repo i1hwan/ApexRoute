@@ -61,7 +61,7 @@ function withinPressureMaxBand(actual, tracks) {
 
 const { setQuotaCache, markAccountExhaustedFrom429 } = quotaCache;
 const { isTerminalConnectionStatus, normalizeStatus } = accountTerminalStatus;
-const { clearSessions, touchSession, generateSessionId } = sessionManager;
+const { clearSessions, touchSession, generateSessionId, bindSessionConnection } = sessionManager;
 
 function resetCacheState() {
   // The quotaCache module exposes no clear() helper. We seed deterministic
@@ -100,6 +100,16 @@ function seedSingleWeeklyAccount(connId, provider, opts) {
   setQuotaCache(connId, provider, quotas);
 }
 
+function seedSingleSessionAccount(connId, provider, opts) {
+  const quotas = {
+    "session (5h)": {
+      remainingPercentage: opts.sessionRem,
+      resetAt: opts.sessionResetSec === null ? null : isoIn(opts.sessionResetSec),
+    },
+  };
+  setQuotaCache(connId, provider, quotas);
+}
+
 const claudeConn = (id, extras = {}) => ({
   id,
   isActive: extras.isActive ?? true,
@@ -107,6 +117,17 @@ const claudeConn = (id, extras = {}) => ({
   testStatus: extras.testStatus ?? "active",
   backoffLevel: extras.backoffLevel ?? 0,
   lastError: extras.lastError ?? null,
+  provider: extras.provider ?? "claude",
+});
+
+const githubConn = (id, extras = {}) => ({
+  id,
+  isActive: extras.isActive ?? true,
+  rateLimitedUntil: extras.rateLimitedUntil ?? null,
+  testStatus: extras.testStatus ?? "active",
+  backoffLevel: extras.backoffLevel ?? 0,
+  lastError: extras.lastError ?? null,
+  provider: extras.provider ?? "github",
 });
 
 test.beforeEach(() => {
@@ -950,25 +971,36 @@ test("SA-1: bound healthy + alt only 1.5x score → keep affinity (no break)", (
   assert.equal(result.selected.id, "bound", "1.5× alt should not break 3× threshold");
 });
 
-test("SA-2: alt 4x score AND >250 abs delta → break (heuristic_break_p1_too_urgent)", () => {
+test("SA-2: alt 4x score AND >250 abs delta → break for non-Claude provider (github)", () => {
   // bound: Q=20, t=W_S → pressure=20. alt: Q=20, t=W_S/100 → pressure=20×100=2000.
-  // ratio=100×, delta=1980 → triggers both factor and absolute delta gates
-  seedClaudeAccount("bound", {
+  // ratio=100×, delta=1980 → triggers both factor and absolute delta gates.
+  // Uses GitHub provider so the Claude cache-sensitive gate (PR #28 D3)
+  // does NOT suppress the urgent-alt break. Claude-blocked variant lives in SA-12.
+  // Note: setQuotaCache stores a provider tag alongside the per-connectionId
+  // entry but the lookup key for scoreSessionTrack/scoreWeeklyTrack is the
+  // connectionId only — the "github" string is descriptive metadata, not part
+  // of the cache key. The Claude gate decision is driven entirely by the
+  // selectByEarliestResetFirst third argument below.
+  seedSingleSessionAccount("bound-gh", "github", {
     sessionRem: 20,
     sessionResetSec: W_SESSION_SEC,
-    weeklyRem: 80,
-    weeklyResetSec: W_WEEKLY_SEC,
   });
-  seedClaudeAccount("alt", {
+  seedSingleSessionAccount("alt-gh", "github", {
     sessionRem: 20,
     sessionResetSec: 180, // W_SESSION_SEC / 100 = 180s
-    weeklyRem: 80,
-    weeklyResetSec: W_WEEKLY_SEC,
   });
   const sessionId = "sa-2-session";
-  touchSession(sessionId, "bound");
-  const result = selectByEarliestResetFirst([claudeConn("bound"), claudeConn("alt")], sessionId);
-  assert.equal(result.selected.id, "alt", "4×+ alt with large abs delta should break affinity");
+  bindSessionConnection(sessionId, "bound-gh", { source: "explicit_post_credential" });
+  const result = selectByEarliestResetFirst(
+    [githubConn("bound-gh"), githubConn("alt-gh")],
+    sessionId,
+    "github"
+  );
+  assert.equal(
+    result.selected.id,
+    "alt-gh",
+    "non-Claude provider must keep original 4× urgent-alt break"
+  );
 });
 
 test("SA-3: bound 10% session AND alt usable → break (heuristic_break_low_quota)", () => {
@@ -1153,5 +1185,92 @@ test("SA-11: scoredAlternatives without bound entry → keep affinity (footgun g
     out.valid,
     true,
     "scoredAlternatives missing bound → must NOT trigger urgent-break with boundScore=0"
+  );
+});
+
+test("SA-12: Claude bound + 4× alt urgent → cache-sensitive gate BLOCKS urgent-alt break", () => {
+  // PR #28 D3 gate: for Claude OAuth lane, the urgent-alt break is suppressed
+  // unless boundScore is non-positive. SA-2 fixture in non-Claude form proves
+  // the underlying break still fires for github; this test proves Claude is
+  // protected. Same pressure shape as SA-2 but provider="claude".
+  seedClaudeAccount("bound-cl", {
+    sessionRem: 20,
+    sessionResetSec: W_SESSION_SEC,
+    weeklyRem: 80,
+    weeklyResetSec: W_WEEKLY_SEC,
+  });
+  seedClaudeAccount("alt-cl", {
+    sessionRem: 20,
+    sessionResetSec: 180,
+    weeklyRem: 80,
+    weeklyResetSec: W_WEEKLY_SEC,
+  });
+  const sessionId = `sa-12-session-${Math.random().toString(36).slice(2)}`;
+  bindSessionConnection(sessionId, "bound-cl", { source: "explicit_post_credential" });
+
+  const result = selectByEarliestResetFirst(
+    [claudeConn("bound-cl"), claudeConn("alt-cl")],
+    sessionId,
+    "claude"
+  );
+  assert.equal(
+    result.selected.id,
+    "bound-cl",
+    "Claude provider must keep affinity even when alt has 4× urgent score"
+  );
+});
+
+test("SA-13: Claude bound score<=0 (no quota cache) + positive alt → gate ALLOWS break", () => {
+  // The Claude gate intentionally allows the break when boundScore <= 0,
+  // because at that point bound is genuinely unusable (heavy backoff/error
+  // penalty has wiped its viability). Sticking to a non-positive bound for
+  // 5 minutes of "cache savings" is a worse outcome than rebinding.
+  // Bound has no quota cache entry → scoreAccount returns score=0.
+  const boundId = `sa-13-bound-${Math.random().toString(36).slice(2)}`;
+  seedClaudeAccount("alt-cl-13", {
+    sessionRem: 50,
+    sessionResetSec: W_SESSION_SEC,
+    weeklyRem: 80,
+    weeklyResetSec: W_WEEKLY_SEC,
+  });
+  const sessionId = `sa-13-session-${Math.random().toString(36).slice(2)}`;
+  bindSessionConnection(sessionId, boundId, { source: "explicit_post_credential" });
+
+  const result = selectByEarliestResetFirst(
+    [claudeConn(boundId), claudeConn("alt-cl-13")],
+    sessionId,
+    "claude"
+  );
+  assert.equal(
+    result.selected.id,
+    "alt-cl-13",
+    "Claude gate must NOT block break when boundScore <= 0 (bound is genuinely unusable)"
+  );
+});
+
+test("SA-14: GitHub bound + 4× alt urgent → cache-sensitive gate INACTIVE, break fires", () => {
+  // Mirror image of SA-2 with explicit provider="github" passed to selector,
+  // confirming that the gate is provider-scoped and other providers retain
+  // the original urgent-alt break behaviour.
+  seedSingleSessionAccount("bound-gh-14", "github", {
+    sessionRem: 20,
+    sessionResetSec: W_SESSION_SEC,
+  });
+  seedSingleSessionAccount("alt-gh-14", "github", {
+    sessionRem: 20,
+    sessionResetSec: 180,
+  });
+  const sessionId = `sa-14-session-${Math.random().toString(36).slice(2)}`;
+  bindSessionConnection(sessionId, "bound-gh-14", { source: "explicit_post_credential" });
+
+  const result = selectByEarliestResetFirst(
+    [githubConn("bound-gh-14"), githubConn("alt-gh-14")],
+    sessionId,
+    "github"
+  );
+  assert.equal(
+    result.selected.id,
+    "alt-gh-14",
+    "github provider must keep original 4× urgent-alt break (gate is Claude-only)"
   );
 });
