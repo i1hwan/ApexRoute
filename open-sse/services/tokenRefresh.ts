@@ -234,9 +234,126 @@ export async function refreshKimiCodingToken(refreshToken, log, proxyConfig = nu
 }
 
 /**
- * Specialized refresh for Claude OAuth tokens
+ * Specialized refresh for Claude OAuth tokens.
+ *
+ * Legacy contract preserved (returns `{ accessToken, refreshToken, expiresIn }`
+ * on success or `null` on any failure). Many call sites depend on this shape:
+ *   - src/sse/services/tokenRefresh.ts re-export
+ *   - src/app/api/providers/[id]/refresh/route.ts
+ *   - getAccessToken() switch (this file, line ~762)
+ *
+ * For graceful degradation in the dashboard Provider Limits path, use
+ * `refreshClaudeOAuthTokenClassified()` below — it returns a discriminated
+ * union distinguishing transient / permanent failures from null.
  */
 export async function refreshClaudeOAuthToken(refreshToken, log, proxyConfig = null) {
+  const classified = await refreshClaudeOAuthTokenClassified(refreshToken, log, proxyConfig);
+  if (classified.status === "ok") {
+    return {
+      accessToken: classified.accessToken,
+      refreshToken: classified.refreshToken || refreshToken,
+      expiresIn: classified.expiresIn,
+    };
+  }
+  return null;
+}
+
+export type ClaudeRefreshTransientReason =
+  | "rate_limited"
+  | "upstream_5xx"
+  | "timeout"
+  | "network"
+  | "unknown_transient";
+
+export type ClaudeRefreshPermanentReason =
+  | "invalid_grant"
+  | "revoked"
+  | "unauthorized_client"
+  | "unauthorized"
+  | "bad_request"
+  | "forbidden"
+  | "soft_failure_200"
+  | "unknown_permanent";
+
+export type ClaudeRefreshClassification =
+  | {
+      status: "ok";
+      accessToken: string;
+      refreshToken?: string;
+      expiresIn?: number;
+    }
+  | {
+      status: "transient";
+      reason: ClaudeRefreshTransientReason;
+      cause?: string;
+    }
+  | {
+      status: "permanent";
+      reason: ClaudeRefreshPermanentReason;
+      cause?: string;
+    };
+
+const TRANSIENT_OAUTH_ERROR_KEYWORDS = ["temporarily_unavailable", "server_error", "slow_down"];
+
+function classifyClaudeOAuthErrorBody(
+  status: number,
+  bodyText: string
+): ClaudeRefreshClassification {
+  let parsed: Record<string, unknown> | null = null;
+  try {
+    parsed = JSON.parse(bodyText);
+  } catch {
+    parsed = null;
+  }
+
+  const errorCode =
+    typeof parsed?.error === "string"
+      ? (parsed.error as string).toLowerCase()
+      : new URLSearchParams(bodyText).get("error")?.toLowerCase() || "";
+
+  if (errorCode === "invalid_grant") {
+    return { status: "permanent", reason: "invalid_grant", cause: bodyText.slice(0, 256) };
+  }
+  if (errorCode === "revoked_token" || errorCode === "token_revoked" || errorCode === "revoked") {
+    return { status: "permanent", reason: "revoked", cause: bodyText.slice(0, 256) };
+  }
+  if (errorCode === "unauthorized_client") {
+    return { status: "permanent", reason: "unauthorized_client", cause: bodyText.slice(0, 256) };
+  }
+  if (TRANSIENT_OAUTH_ERROR_KEYWORDS.includes(errorCode)) {
+    return { status: "transient", reason: "unknown_transient", cause: errorCode };
+  }
+
+  if (status === 400) {
+    return { status: "permanent", reason: "bad_request", cause: bodyText.slice(0, 256) };
+  }
+  if (status === 401) {
+    return { status: "permanent", reason: "unauthorized", cause: bodyText.slice(0, 256) };
+  }
+  if (status === 403) {
+    return { status: "permanent", reason: "forbidden", cause: bodyText.slice(0, 256) };
+  }
+  return {
+    status: "permanent",
+    reason: "unknown_permanent",
+    cause: `${status}: ${bodyText.slice(0, 256)}`,
+  };
+}
+
+/**
+ * Classified Claude OAuth refresh — returns a discriminated union so the
+ * caller (typically `providerLimits.ts::refreshAndUpdateCredentials`) can
+ * keep cached gauges visible on transient failures (429 / 5xx / network /
+ * timeout) instead of nuking the whole row to a red error block.
+ *
+ * Permanent reasons require the user to re-authorize.
+ */
+export async function refreshClaudeOAuthTokenClassified(
+  refreshToken,
+  log,
+  proxyConfig = null
+): Promise<ClaudeRefreshClassification> {
+  let response: Response;
   try {
     const headers = {
       "Content-Type": "application/x-www-form-urlencoded",
@@ -255,40 +372,144 @@ export async function refreshClaudeOAuthToken(refreshToken, log, proxyConfig = n
       buildClaudeRefreshRequestMeta(refreshToken, headers, params, proxyConfig)
     );
 
-    const response = await runWithProxyContext(proxyConfig, () =>
+    response = await runWithProxyContext(proxyConfig, () =>
       fetch(OAUTH_ENDPOINTS.anthropic.token, {
         method: "POST",
         headers,
         body: params.toString(),
       })
     );
+  } catch (error) {
+    const message = (error as Error)?.message || String(error);
+    log?.error?.("TOKEN_REFRESH", `Network error refreshing Claude token: ${message}`);
+    return { status: "transient", reason: "network", cause: message };
+  }
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      log?.error?.("TOKEN_REFRESH", "Failed to refresh Claude OAuth token", {
-        status: response.status,
-        error: errorText,
-      });
-      return null;
+  if (response.status === 408) {
+    return { status: "transient", reason: "timeout" };
+  }
+  if (response.status === 429) {
+    return { status: "transient", reason: "rate_limited" };
+  }
+  if (response.status >= 500 && response.status < 600) {
+    const body = await response.text().catch(() => "");
+    return {
+      status: "transient",
+      reason: "upstream_5xx",
+      cause: `${response.status}: ${body.slice(0, 256)}`,
+    };
+  }
+
+  if (response.ok) {
+    let tokens: Record<string, unknown> = {};
+    try {
+      tokens = await response.json();
+    } catch (err) {
+      const message = (err as Error)?.message || "json parse error";
+      log?.error?.("TOKEN_REFRESH", "Claude refresh 200 with non-JSON body", { error: message });
+      return { status: "permanent", reason: "soft_failure_200", cause: message };
     }
-
-    const tokens = await response.json();
-
+    const accessToken = typeof tokens.access_token === "string" ? tokens.access_token : "";
+    if (!accessToken) {
+      const errSnippet =
+        typeof tokens.error === "string" || typeof tokens.error_description === "string"
+          ? `${tokens.error ?? ""} ${tokens.error_description ?? ""}`.trim()
+          : "missing access_token";
+      log?.error?.("TOKEN_REFRESH", "Claude refresh 200 but no access_token", {
+        error: errSnippet,
+      });
+      return { status: "permanent", reason: "soft_failure_200", cause: errSnippet };
+    }
     log?.info?.("TOKEN_REFRESH", "Successfully refreshed Claude OAuth token", {
-      hasNewAccessToken: !!tokens.access_token,
+      hasNewAccessToken: true,
       hasNewRefreshToken: !!tokens.refresh_token,
       expiresIn: tokens.expires_in,
     });
-
     return {
-      accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token || refreshToken,
-      expiresIn: tokens.expires_in,
+      status: "ok",
+      accessToken,
+      refreshToken: typeof tokens.refresh_token === "string" ? tokens.refresh_token : undefined,
+      expiresIn: typeof tokens.expires_in === "number" ? tokens.expires_in : undefined,
     };
-  } catch (error) {
-    log?.error?.("TOKEN_REFRESH", `Network error refreshing Claude token: ${error.message}`);
-    return null;
   }
+
+  const errorText = await response.text().catch(() => "");
+  log?.error?.("TOKEN_REFRESH", "Failed to refresh Claude OAuth token", {
+    status: response.status,
+    error: errorText.slice(0, 256),
+  });
+  return classifyClaudeOAuthErrorBody(response.status, errorText);
+}
+
+/**
+ * Retry wrapper for `refreshClaudeOAuthTokenClassified`.
+ *
+ * Backoff matches the existing `refreshWithRetry` helper exactly
+ * (`attempt * 1000` ms — 1s before 2nd attempt, 2s before 3rd). Each
+ * attempt is wrapped in `withTimeout(REFRESH_TIMEOUT_MS=30000)` so a
+ * hanging fetch becomes a transient timeout instead of stalling forever.
+ *
+ * - `"ok"` → return immediately, recordSuccess.
+ * - `"permanent"` → return immediately, do NOT recordFailure (permanent
+ *   means the user must re-auth, not that the provider is unstable).
+ * - `"transient"` → retry up to maxRetries; if all exhausted, recordFailure.
+ *
+ * Plain `refreshWithRetry` cannot be reused: it treats any truthy result
+ * as success, so it would stop retrying on the first `{ status: "transient" }`
+ * object.
+ */
+export async function refreshClaudeOAuthTokenWithRetry(
+  refreshToken,
+  log,
+  proxyConfig = null,
+  maxRetries = 3
+): Promise<ClaudeRefreshClassification> {
+  if (isProviderBlocked("claude")) {
+    log?.warn?.("TOKEN_REFRESH", "⚡ Circuit breaker active for claude, skipping refresh");
+    return { status: "transient", reason: "unknown_transient", cause: "circuit_breaker" };
+  }
+
+  let last: ClaudeRefreshClassification = {
+    status: "transient",
+    reason: "unknown_transient",
+  };
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    if (attempt > 0) {
+      const delay = attempt * 1000;
+      log?.debug?.("TOKEN_REFRESH", `Retry ${attempt}/${maxRetries} after ${delay}ms (claude)`);
+      await new Promise((r) => setTimeout(r, delay));
+    }
+
+    const classified = await withTimeout(
+      () => refreshClaudeOAuthTokenClassified(refreshToken, log, proxyConfig),
+      REFRESH_TIMEOUT_MS
+    );
+
+    if (classified === null) {
+      last = { status: "transient", reason: "timeout", cause: "withTimeout" };
+      continue;
+    }
+
+    last = classified;
+
+    if (classified.status === "ok") {
+      recordSuccess("claude");
+      return classified;
+    }
+    if (classified.status === "permanent") {
+      return classified;
+    }
+  }
+
+  recordFailure("claude", log);
+  log?.warn?.(
+    "TOKEN_REFRESH",
+    `All ${maxRetries} retry attempts exhausted for claude (transient: ${
+      last.status === "transient" ? last.reason : "unknown"
+    })`
+  );
+  return last;
 }
 
 /**

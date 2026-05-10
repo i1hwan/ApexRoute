@@ -7,7 +7,18 @@ const DEFAULT_APP_LOG_MAX_FILES = 20;
 const DEFAULT_CALL_LOG_MAX_ENTRIES = 10000;
 const DEFAULT_CALL_LOGS_TABLE_MAX_ROWS = 100000;
 const DEFAULT_PROXY_LOGS_TABLE_MAX_ROWS = 100000;
-const DEFAULT_APP_LOG_PATH = path.join(process.cwd(), "logs", "application", "app.log");
+// Default log path lives under the data directory so it inherits the
+// writable-volume guarantee of `<DATA_DIR>` (Docker) or `<cwd>/data`
+// (local dev). Previously this resolved to `<cwd>/logs/application/app.log`
+// which the Dockerfile never created, causing the pino transport worker to
+// die on first write and flood every chat request with `Error: the worker
+// has exited` uncaughtExceptions (PR #29).
+function resolveDefaultDataDir(): string {
+  const fromEnv = process.env.DATA_DIR;
+  if (fromEnv && fromEnv.trim().length > 0) return fromEnv;
+  return path.join(process.cwd(), "data");
+}
+const DEFAULT_APP_LOG_PATH = path.join(resolveDefaultDataDir(), "logs", "application", "app.log");
 
 function parsePositiveInt(value: string | undefined, fallback: number): number {
   if (!value) return fallback;

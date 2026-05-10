@@ -6,16 +6,30 @@
  *   - Cleaning up old log files past retention period
  *   - Capping the number of rotated log files kept on disk
  *   - Creating the log directory on startup
+ *   - Probing the log destination for actual writability before the pino
+ *     transport worker starts (avoids the worker dying on first write and
+ *     flooding chat requests with `Error: the worker has exited` — PR #29)
  *
  * Configuration via env vars:
  *   - APP_LOG_TO_FILE: enable file logging (default: true)
- *   - APP_LOG_FILE_PATH: path to log file (default: logs/application/app.log)
+ *   - APP_LOG_FILE_PATH: path to log file (default: <DATA_DIR>/logs/application/app.log)
  *   - APP_LOG_MAX_FILE_SIZE: max file size before rotation (default: 50MB)
  *   - APP_LOG_RETENTION_DAYS: days to keep old logs (default: 7)
  *   - APP_LOG_MAX_FILES: max number of rotated log files to keep (default: 20)
  */
 
-import { existsSync, mkdirSync, statSync, renameSync, readdirSync, unlinkSync } from "fs";
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeSync,
+} from "fs";
+import { randomBytes } from "crypto";
 import { dirname, join, basename, extname } from "path";
 import {
   getAppLogFilePath,
@@ -35,20 +49,133 @@ export function getLogConfig() {
   return { logToFile, logFilePath, maxFileSize, retentionDays, maxFiles };
 }
 
-/**
- * Ensure the log directory exists.
- */
-export function ensureLogDir(logFilePath: string): void {
+export type LogDirEnsureResult = "created" | "exists" | "failed";
+
+export function ensureLogDir(logFilePath: string): LogDirEnsureResult {
   const dir = dirname(logFilePath);
-  if (!existsSync(dir)) {
+  try {
+    if (existsSync(dir)) {
+      const st = statSync(dir);
+      if (!st.isDirectory()) return "failed";
+      return "exists";
+    }
     mkdirSync(dir, { recursive: true });
+    return "created";
+  } catch {
+    return "failed";
   }
 }
 
+export type WritableProbeFailReason =
+  | "EACCES"
+  | "EROFS"
+  | "ENOENT"
+  | "ENOSPC"
+  | "ENOTDIR"
+  | "EEXIST_FILE"
+  | "TARGET_IS_DIR"
+  | "UNKNOWN";
+
+export type WritableProbeResult = { ok: true } | { ok: false; reason: WritableProbeFailReason };
+
 /**
- * Rotate the log file if it exceeds the max size.
- * Renames current file to app.YYYY-MM-DD_HHmmss.log
+ * Verify that the log destination is actually writable.
+ *
+ * Two-stage check (Oracle PR #29 review):
+ *   (1) If `logFilePath` exists and is a directory → TARGET_IS_DIR.
+ *   (2) If `logFilePath` exists as a regular file → open it in append mode
+ *       (`"a"`) and close it. This catches the case where an old `app.log`
+ *       was created with read-only permissions (EACCES on `pino/file`'s
+ *       first write, which would kill the transport worker).
+ *   (3) Otherwise probe the parent directory with an exclusive-create
+ *       one-byte write. Catches read-only mounts (EROFS), missing
+ *       permissions (EACCES), full filesystems (ENOSPC), missing parent
+ *       (ENOENT), wrong-type parent (ENOTDIR).
+ *
+ * Probe cleanup is `try/finally`-guaranteed: fd is closed and the probe
+ * file is unlinked whether the write succeeded or failed.
  */
+export function verifyLogDirWritable(logFilePath: string): WritableProbeResult {
+  let targetExistsAsFile = false;
+  try {
+    if (existsSync(logFilePath)) {
+      const st = statSync(logFilePath);
+      if (st.isDirectory()) return { ok: false, reason: "TARGET_IS_DIR" };
+      if (st.isFile()) targetExistsAsFile = true;
+    }
+  } catch {
+    // ignore — fall through to probe
+  }
+
+  if (targetExistsAsFile) {
+    let appendFd: number | null = null;
+    try {
+      appendFd = openSync(logFilePath, "a");
+      return { ok: true };
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException)?.code ?? "UNKNOWN";
+      const reason: WritableProbeFailReason =
+        code === "EACCES" || code === "EROFS" || code === "ENOSPC" ? code : "UNKNOWN";
+      return { ok: false, reason };
+    } finally {
+      if (appendFd !== null) {
+        try {
+          closeSync(appendFd);
+        } catch {
+          /* best-effort */
+        }
+      }
+    }
+  }
+
+  const dir = dirname(logFilePath);
+  const probe = join(
+    dir,
+    `.write-probe-${process.pid}-${Date.now()}-${randomBytes(4).toString("hex")}`
+  );
+
+  let fd: number | null = null;
+  let opened = false;
+  try {
+    fd = openSync(probe, "wx");
+    opened = true;
+    writeSync(fd, Buffer.from("0"));
+    return { ok: true };
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException)?.code ?? "UNKNOWN";
+    let reason: WritableProbeFailReason;
+    if (
+      code === "EACCES" ||
+      code === "EROFS" ||
+      code === "ENOENT" ||
+      code === "ENOSPC" ||
+      code === "ENOTDIR"
+    ) {
+      reason = code;
+    } else if (code === "EEXIST") {
+      reason = "EEXIST_FILE";
+    } else {
+      reason = "UNKNOWN";
+    }
+    return { ok: false, reason };
+  } finally {
+    if (fd !== null) {
+      try {
+        closeSync(fd);
+      } catch {
+        /* best-effort */
+      }
+    }
+    if (opened) {
+      try {
+        unlinkSync(probe);
+      } catch {
+        /* best-effort — file may have been removed by another process */
+      }
+    }
+  }
+}
+
 export function rotateIfNeeded(logFilePath: string, maxFileSize: number): void {
   try {
     if (!existsSync(logFilePath)) return;
@@ -72,9 +199,6 @@ export function rotateIfNeeded(logFilePath: string, maxFileSize: number): void {
   }
 }
 
-/**
- * Remove log files older than the retention period.
- */
 export function cleanupOldLogs(logFilePath: string, retentionDays: number): void {
   try {
     const dir = dirname(logFilePath);
@@ -86,7 +210,6 @@ export function cleanupOldLogs(logFilePath: string, retentionDays: number): void
     const cutoff = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
 
     for (const file of files) {
-      // Match rotated files like app.2026-02-19_030000.log
       if (file.startsWith(base + ".") && file.endsWith(ext) && file !== basename(logFilePath)) {
         const filePath = join(dir, file);
         try {
@@ -104,9 +227,6 @@ export function cleanupOldLogs(logFilePath: string, retentionDays: number): void
   }
 }
 
-/**
- * Keep only the newest rotated files up to the configured count limit.
- */
 export function cleanupOverflowLogs(logFilePath: string, maxFiles: number): void {
   try {
     const dir = dirname(logFilePath);
@@ -142,16 +262,32 @@ export function cleanupOverflowLogs(logFilePath: string, maxFiles: number): void
   }
 }
 
+export type LogRotationInitResult =
+  | { enabled: true; reason: "ok" }
+  | {
+      enabled: false;
+      reason: "disabled" | "mkdir_failed" | "not_writable";
+      detail?: WritableProbeFailReason;
+    };
+
 /**
  * Initialize log rotation — call once at application startup.
- * Creates directories, rotates if needed, and cleans up old files.
+ * Returns a structured outcome so the logger build path can branch
+ * deterministically (file transport vs sync stdout fallback) without
+ * relying on later transport-worker death.
  */
-export function initLogRotation(): void {
+export function initLogRotation(): LogRotationInitResult {
   const config = getLogConfig();
-  if (!config.logToFile) return;
+  if (!config.logToFile) return { enabled: false, reason: "disabled" };
 
-  ensureLogDir(config.logFilePath);
+  const ensure = ensureLogDir(config.logFilePath);
+  if (ensure === "failed") return { enabled: false, reason: "mkdir_failed" };
+
+  const v = verifyLogDirWritable(config.logFilePath);
+  if (!v.ok) return { enabled: false, reason: "not_writable", detail: v.reason };
+
   rotateIfNeeded(config.logFilePath, config.maxFileSize);
   cleanupOldLogs(config.logFilePath, config.retentionDays);
   cleanupOverflowLogs(config.logFilePath, config.maxFiles);
+  return { enabled: true, reason: "ok" };
 }

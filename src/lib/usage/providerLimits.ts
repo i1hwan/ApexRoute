@@ -17,6 +17,11 @@ import { USAGE_SUPPORTED_PROVIDERS } from "@/shared/constants/providers";
 import { getExecutor } from "@omniroute/open-sse/executors/index.ts";
 import { getUsageForProvider } from "@omniroute/open-sse/services/usage.ts";
 import { runWithProxyContext } from "@omniroute/open-sse/utils/proxyFetch.ts";
+import {
+  refreshClaudeOAuthTokenWithRetry,
+  type ClaudeRefreshClassification,
+  type ClaudeRefreshTransientReason,
+} from "@omniroute/open-sse/services/tokenRefresh.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -85,7 +90,35 @@ async function syncToCloudIfEnabled() {
   }
 }
 
-async function refreshAndUpdateCredentials(connection: ProviderConnectionLike) {
+export type RefreshWarning = {
+  kind: "refresh_transient";
+  reason: ClaudeRefreshTransientReason;
+  cause?: string;
+  since: string;
+};
+
+type RefreshOutcome = {
+  connection: ProviderConnectionLike;
+  refreshed: boolean;
+  warning?: RefreshWarning;
+};
+
+/**
+ * Refresh credentials for a single connection.
+ *
+ * `claudeMaxRetries` caps the Claude OAuth retry count. The default is 3
+ * (worst case ~93s: 30s × 3 attempts + 1s + 2s backoff). The batch path
+ * (`syncAllProviderLimits`) passes 2 to keep worst case under typical
+ * reverse-proxy read-timeouts (60-100s for nginx/Cloudflare). Per-row
+ * interactive refresh keeps the default 3 — the user is actively waiting
+ * and a 90s ceiling is acceptable for a single connection.
+ *
+ * Oracle PR #29 review M3.
+ */
+async function refreshAndUpdateCredentials(
+  connection: ProviderConnectionLike,
+  claudeMaxRetries = 3
+): Promise<RefreshOutcome> {
   const executor = getExecutor(connection.provider);
   const credentials = {
     accessToken: connection.accessToken,
@@ -98,6 +131,53 @@ async function refreshAndUpdateCredentials(connection: ProviderConnectionLike) {
 
   if (!executor.needsRefresh(credentials)) {
     return { connection, refreshed: false };
+  }
+
+  if (connection.provider === "claude" && connection.refreshToken) {
+    const classified: ClaudeRefreshClassification = await refreshClaudeOAuthTokenWithRetry(
+      connection.refreshToken,
+      console,
+      null,
+      claudeMaxRetries
+    );
+    if (classified.status === "transient") {
+      return {
+        connection,
+        refreshed: false,
+        warning: {
+          kind: "refresh_transient",
+          reason: classified.reason,
+          cause: classified.cause,
+          since: new Date().toISOString(),
+        },
+      };
+    }
+    if (classified.status === "permanent") {
+      throw withStatus(
+        new Error(
+          `Failed to refresh credentials (${classified.reason}). Please re-authorize the connection.`
+        ),
+        401
+      );
+    }
+    const updateData: JsonRecord = {
+      updatedAt: new Date().toISOString(),
+      accessToken: classified.accessToken,
+    };
+    if (classified.refreshToken) {
+      updateData.refreshToken = classified.refreshToken;
+    }
+    if (classified.expiresIn) {
+      updateData.tokenExpiresAt = new Date(Date.now() + classified.expiresIn * 1000).toISOString();
+    }
+    await updateProviderConnection(connection.id, updateData);
+    return {
+      connection: {
+        ...connection,
+        ...updateData,
+      },
+      refreshed: true,
+    };
   }
 
   const refreshResult = await executor.refreshCredentials(credentials, console);
@@ -210,10 +290,57 @@ export function getCachedProviderLimitsMap(): Record<string, ProviderLimitsCache
   return getAllProviderLimitsCache();
 }
 
-export async function fetchLiveProviderLimits(connectionId: string): Promise<{
+export type FetchLiveResult = {
   connection: ProviderConnectionLike;
   usage: JsonRecord;
-}> {
+  warning?: RefreshWarning;
+  /**
+   * False when the result is a synthetic transient response built from
+   * cached snapshot or no-cache placeholder. Callers MUST NOT persist
+   * such results — doing so would clobber the real cache or rewrite
+   * stale `fetchedAt` timestamps.
+   */
+  persist: boolean;
+};
+
+function buildTransientFromCache(
+  connection: ProviderConnectionLike,
+  warning: RefreshWarning
+): FetchLiveResult {
+  const cached = getAllProviderLimitsCache()[connection.id];
+  if (cached) {
+    return {
+      connection,
+      usage: {
+        quotas: cached.quotas,
+        plan: cached.plan,
+        message: cached.message,
+        fetchedAt: cached.fetchedAt,
+        source: "cache_stale_pending_refresh",
+      },
+      warning,
+      persist: false,
+    };
+  }
+  return {
+    connection,
+    usage: {
+      quotas: null,
+      plan: null,
+      message: "Temporarily unavailable; no cached limits yet",
+      fetchedAt: null,
+      source: "no_cache_pending_refresh",
+    },
+    warning,
+    persist: false,
+  };
+}
+
+export async function fetchLiveProviderLimits(
+  connectionId: string,
+  options: { claudeMaxRetries?: number } = {}
+): Promise<FetchLiveResult> {
+  const { claudeMaxRetries = 3 } = options;
   let connection = (await getProviderConnectionById(connectionId)) as ProviderConnectionLike | null;
   if (!connection) {
     throw withStatus(new Error("Connection not found"), 404);
@@ -229,19 +356,27 @@ export async function fetchLiveProviderLimits(connectionId: string): Promise<{
       setQuotaCache(connectionId, connection.provider, usage.quotas);
     }
     await syncExpiredStatusIfNeeded(connection, usage);
-    return { connection, usage };
+    return { connection, usage, persist: true };
   }
 
   const proxyInfo = await resolveProxyForConnection(connectionId);
 
-  const fetchUsageWithContext = async (proxyConfig: unknown) =>
+  const fetchUsageWithContext = async (
+    proxyConfig: unknown
+  ): Promise<{ usage: JsonRecord; warning?: RefreshWarning; persist: boolean }> =>
     runWithProxyContext(proxyConfig, async () => {
       let conn = connection as ProviderConnectionLike;
       let wasRefreshed = false;
 
-      const result = await refreshAndUpdateCredentials(conn);
+      const result = await refreshAndUpdateCredentials(conn, claudeMaxRetries);
       conn = result.connection;
       wasRefreshed = result.refreshed;
+
+      if (result.warning) {
+        connection = conn;
+        const synthetic = buildTransientFromCache(conn, result.warning);
+        return { usage: synthetic.usage, warning: result.warning, persist: false };
+      }
 
       if (wasRefreshed) {
         await syncToCloudIfEnabled();
@@ -249,25 +384,35 @@ export async function fetchLiveProviderLimits(connectionId: string): Promise<{
 
       const usageData = (await getUsageForProvider(conn)) as JsonRecord;
       connection = conn;
-      return { usage: usageData };
+      return { usage: usageData, persist: true };
     });
 
-  let result: { usage: JsonRecord };
+  let result: { usage: JsonRecord; warning?: RefreshWarning; persist: boolean };
   const proxyConfig = proxyInfo?.proxy || null;
 
   try {
     result = await fetchUsageWithContext(proxyConfig);
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const errMessage =
+      error instanceof Error ? error.message : typeof error === "string" ? error : "";
+    const errCode =
+      error && typeof error === "object" && "code" in error
+        ? (error as { code?: unknown }).code
+        : undefined;
+    const errCauseCode =
+      error && typeof error === "object" && "cause" in error
+        ? ((error as { cause?: { code?: unknown } }).cause as { code?: unknown } | undefined)?.code
+        : undefined;
     const isThrownNetworkError =
-      error?.message === "fetch failed" ||
-      error?.code === "PROXY_UNREACHABLE" ||
-      error?.code === "UND_ERR_CONNECT_TIMEOUT" ||
-      error?.cause?.code === "ECONNREFUSED";
+      errMessage === "fetch failed" ||
+      errCode === "PROXY_UNREACHABLE" ||
+      errCode === "UND_ERR_CONNECT_TIMEOUT" ||
+      errCauseCode === "ECONNREFUSED";
 
     if (proxyConfig && isThrownNetworkError) {
       console.warn(
         `[ProviderLimits] Proxy fetch threw for ${connectionId}, retrying without proxy:`,
-        error?.message
+        errMessage
       );
       result = await fetchUsageWithContext(null);
     } else {
@@ -275,7 +420,7 @@ export async function fetchLiveProviderLimits(connectionId: string): Promise<{
     }
   }
 
-  if (proxyConfig && isNetworkFailureMessage(result.usage?.message)) {
+  if (proxyConfig && !result.warning && isNetworkFailureMessage(result.usage?.message)) {
     console.warn(
       `[ProviderLimits] Proxy usage returned network error for ${connectionId}, retrying without proxy:`,
       result.usage.message
@@ -283,14 +428,18 @@ export async function fetchLiveProviderLimits(connectionId: string): Promise<{
     result = await fetchUsageWithContext(null);
   }
 
-  if (isRecord(result.usage.quotas)) {
+  if (!result.warning && isRecord(result.usage.quotas)) {
     setQuotaCache(connectionId, connection.provider, result.usage.quotas);
   }
-  await syncExpiredStatusIfNeeded(connection, result.usage);
+  if (!result.warning) {
+    await syncExpiredStatusIfNeeded(connection, result.usage);
+  }
 
   return {
     connection,
     usage: result.usage,
+    warning: result.warning,
+    persist: result.persist,
   };
 }
 
@@ -300,12 +449,21 @@ export async function fetchAndPersistProviderLimits(
 ): Promise<{
   connection: ProviderConnectionLike;
   usage: JsonRecord;
-  cache: ProviderLimitsCacheEntry;
+  cache: ProviderLimitsCacheEntry | null;
+  warning?: RefreshWarning;
 }> {
-  const { connection, usage } = await fetchLiveProviderLimits(connectionId);
-  const cache = toProviderLimitsCacheEntry(usage, source);
+  const result = await fetchLiveProviderLimits(connectionId);
+  if (!result.persist) {
+    return {
+      connection: result.connection,
+      usage: result.usage,
+      cache: null,
+      warning: result.warning,
+    };
+  }
+  const cache = toProviderLimitsCacheEntry(result.usage, source);
   setProviderLimitsCache(connectionId, cache);
-  return { connection, usage, cache };
+  return { connection: result.connection, usage: result.usage, cache, warning: result.warning };
 }
 
 export async function syncAllProviderLimits(
@@ -319,6 +477,7 @@ export async function syncAllProviderLimits(
   failed: number;
   caches: Record<string, ProviderLimitsCacheEntry>;
   errors: Record<string, string>;
+  warnings: Record<string, RefreshWarning>;
 }> {
   const { source = "manual", concurrency = 5 } = options;
   const connections = (
@@ -327,14 +486,22 @@ export async function syncAllProviderLimits(
   const cacheEntries: Array<{ connectionId: string; entry: ProviderLimitsCacheEntry }> = [];
   const caches: Record<string, ProviderLimitsCacheEntry> = {};
   const errors: Record<string, string> = {};
+  const warnings: Record<string, RefreshWarning> = {};
 
   for (let i = 0; i < connections.length; i += concurrency) {
     const chunk = connections.slice(i, i + concurrency);
     const results = await Promise.allSettled(
       chunk.map(async (connection) => {
-        const { usage } = await fetchLiveProviderLimits(connection.id);
-        const cache = toProviderLimitsCacheEntry(usage, source);
-        return { connectionId: connection.id, cache };
+        const live = await fetchLiveProviderLimits(connection.id, { claudeMaxRetries: 2 });
+        const fetchedAt =
+          typeof live.usage.fetchedAt === "string" ? live.usage.fetchedAt : undefined;
+        const cache = toProviderLimitsCacheEntry(live.usage, source, fetchedAt);
+        return {
+          connectionId: connection.id,
+          cache,
+          warning: live.warning,
+          persist: live.persist,
+        };
       })
     );
 
@@ -343,11 +510,17 @@ export async function syncAllProviderLimits(
       if (!connectionId) return;
 
       if (result.status === "fulfilled") {
-        cacheEntries.push({
-          connectionId: result.value.connectionId,
-          entry: result.value.cache,
-        });
-        caches[result.value.connectionId] = result.value.cache;
+        const { cache, warning, persist } = result.value;
+        if (persist) {
+          cacheEntries.push({
+            connectionId: result.value.connectionId,
+            entry: cache,
+          });
+        }
+        caches[result.value.connectionId] = cache;
+        if (warning) {
+          warnings[result.value.connectionId] = warning;
+        }
         return;
       }
 
@@ -366,9 +539,10 @@ export async function syncAllProviderLimits(
 
   return {
     total: connections.length,
-    succeeded: cacheEntries.length,
-    failed: connections.length - cacheEntries.length,
+    succeeded: connections.length - Object.keys(errors).length,
+    failed: Object.keys(errors).length,
     caches,
     errors,
+    warnings,
   };
 }

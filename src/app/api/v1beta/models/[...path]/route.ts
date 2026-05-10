@@ -1,25 +1,10 @@
 import { CORS_ORIGIN } from "@/shared/utils/cors";
 import { buildClientRawRequest, handleChat } from "@/sse/handlers/chat";
-import { initTranslators } from "@omniroute/open-sse/translator/index.ts";
 import { v1betaGeminiGenerateSchema } from "@/shared/validation/schemas";
 import { isValidationFailure, validateBody } from "@/shared/validation/helpers";
 
-let initialized = false;
+// initTranslators() removed — see /v1/responses/route.ts (#450, PR #29).
 
-/**
- * Initialize translators once
- */
-async function ensureInitialized() {
-  if (!initialized) {
-    await initTranslators();
-    initialized = true;
-    console.log("[SSE] Translators initialized for /v1beta/models");
-  }
-}
-
-/**
- * Handle CORS preflight
- */
 export async function OPTIONS() {
   return new Response(null, {
     headers: {
@@ -35,8 +20,6 @@ export async function OPTIONS() {
  * Converts Gemini format to internal format and handles via handleChat
  */
 export async function POST(request, { params }) {
-  await ensureInitialized();
-
   let rawBody;
   try {
     rawBody = await request.json();

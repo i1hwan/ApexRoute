@@ -4,6 +4,78 @@
 
 ---
 
+## [3.8.8] — 2026-05-09
+
+### 🛡️ Production resilience — three independent fixes
+
+#### Logger transport worker death (Issue 1)
+
+Pino's `pino/file` transport runs inside a `thread-stream` worker. When the destination path was unwritable in the Docker runtime (default `process.cwd()/logs/application/app.log` resolved to `/app/logs/...` which the Dockerfile never created), the worker exited on first write. After that, every subsequent `log.info`/`log.warn`/`log.error` call threw `Error: the worker has exited`, producing 4× uncaughtException stack traces per chat request. Two compounding root causes addressed:
+
+- **Default log path realignment**: now resolves to `<DATA_DIR>/logs/application/app.log` where `DATA_DIR = env.DATA_DIR ?? process.cwd()/data`. This falls under the Dockerfile-created writable volume (`/app/data`) in production and a `.gitignore`d local dir in dev. `APP_LOG_FILE_PATH` env override unchanged.
+- **Writability preflight**: `initLogRotation()` now returns a tri-state result `{ enabled, reason, detail? }`. New `verifyLogDirWritable()` performs a one-byte exclusive-create write probe (catches EACCES, EROFS, ENOENT, ENOSPC, ENOTDIR, EEXIST_FILE) and rejects targets that are themselves directories (TARGET_IS_DIR — `pino/file` would error on first write). Probe cleanup is `try/finally`-guaranteed.
+- **Eager fallback + worker-exit Proxy**: `logger.ts` builds a sync stdout-only fallback logger eagerly at module init (so the catch path never has to construct one). The active logger is wrapped in a Proxy that intercepts log methods, `level` get/set, `child()`, and pass-through methods (`flush`, `bindings`, `isLevelEnabled`). On first `Error("the worker has exited")` (or `ERR_WORKER_OUT_OF_MEMORY` / `ERR_WORKER_NOT_RUNNING`), a module-scoped `swapped` flag is set and ALL subsequent log calls — including those from children created BEFORE the swap — route to the fallback. A single `process.stderr.write` notice; subsequent calls silent. Worker-exit errors are NEVER re-thrown to caller code.
+- **Dockerfile preflight**: `/app/data/logs/application` created explicitly with write permissions in the runner stage. Documented for future non-root variants (`USER node` would require `chown -R node:node /app/data` first).
+- **`initTranslators()` residue removed from seven `/v1/*` routes**: extending the original PR #453/#450 fix that only covered `/v1/responses/route.ts`. The translator registry is bootstrapped exactly once at module load via `open-sse/translator/index.ts`; route-level re-init was a known worker-death trigger. A static unit test (`tests/unit/v1-routes-no-init-translators.test.mjs`) prevents reintroduction.
+
+#### Anthropic OAuth refresh transient failure replaces dashboard gauges with red "Error 0%" (Issue 2)
+
+When Anthropic OAuth refresh failed transiently (429, 5xx, network), `refreshClaudeOAuthToken` collapsed all errors to `null`, `default.ts::refreshCredentials` returned `null`, `providerLimits.ts` threw 401, `errors[connId]` was populated, and the dashboard's red error block replaced the entire row — including the cached gauges. Auto-recovers on next sync cycle, but UX during transient periods loses all signal.
+
+- **Discriminated-union classification** (`tokenRefresh.ts`): new `refreshClaudeOAuthTokenClassified()` returns `{ status: "ok" | "transient" | "permanent" }`. The `"ok"` shape preserves the legacy `{ accessToken, refreshToken?, expiresIn? }` contract for upstream consumers (existing `refreshClaudeOAuthToken()` retained unchanged for back-compat — it now wraps the classified path and folds non-ok into `null`). Classifier handles 200 with error body / missing `access_token` (`soft_failure_200`); 400/401/403 + body tokens (`invalid_grant` / `revoked_token` / `unauthorized_client` mapped to specific permanent reasons); plain 400/401/403 (conservative `bad_request` / `unauthorized` / `forbidden`); 408/429/5xx (transient `timeout` / `rate_limited` / `upstream_5xx`); fetch throw (`network`); other statuses (`unknown_permanent`).
+- **Retry wrapper** (`tokenRefresh.ts`): new `refreshClaudeOAuthTokenWithRetry()` retries only `transient` (existing `refreshWithRetry` cannot — it treats any truthy result as success). Backoff: 1s before 2nd attempt, 2s before 3rd (matches `attempt * 1000`). Each attempt wrapped in `withTimeout(REFRESH_TIMEOUT_MS=30000)` so a hanging fetch becomes transient timeout. Permanent and ok short-circuit. Circuit breaker integrates only on exhausted transient (permanent ≠ "provider unstable" — user must re-auth).
+- **Graceful path in `providerLimits.ts`**: Claude branch in `refreshAndUpdateCredentials` calls the retry wrapper directly. On `transient`, returns `{ connection, refreshed: false, warning: { kind: "refresh_transient", reason, since } }` with NO throw. New `FetchLiveResult.persist: false` invariant — synthetic transient responses (cached snapshot OR `{ quotas: null, message, source: "no_cache_pending_refresh" }` placeholder) are NEVER written to the cache, so the real `fetchedAt` and snapshot are preserved across the transient period.
+- **`syncAllProviderLimits` returns `{ caches, errors, warnings }` parallel maps**: transient → fulfilled with warning, permanent → rejected with error. Only persistable results write to disk (`setProviderLimitsCacheBatch` skips synthetic).
+- **API responses extended**: `POST /api/usage/provider-limits` body now includes `warnings: Record<connId, RefreshWarning>` alongside `errors`. `GET /api/usage/[connectionId]` returns 200 with `usage.warning` for transient (was 401), 401 for permanent (unchanged).
+- **Dashboard `ProviderLimits/index.tsx` keeps gauges visible on warning**: new `warnings` state, parallel to `errors`. `refreshAll` POST handler full-replaces both maps (server-authoritative). `fetchQuota` row refresh: warning sets `warnings[connId]` without touching `quotaData`; success/401/other-error paths all clear `warnings[connId]` so amber + red never coexist.
+- **New `AmberRefreshBadge` component** rendered next to plan/RoutingBadge — separate visual layer from `QuotaProgressBar.staleAfterReset` (which means "gauge reset window passed", not "refresh transient failed"). i18n keys for en + ko (`refreshTransientBadge`, `refreshTransientTooltip`, 5 reason labels). Other locales fall back to next-intl's missing-key handling.
+
+Scope: **Anthropic only**. Other OAuth providers (Codex, Cursor, GitHub Copilot, Antigravity, Kimi Coding, Kilo Code, Cline) retain existing null-on-error behavior — addressed in follow-up PRs as needed.
+
+#### Routing badge mislabeled "Low quota" as "Quota exhausted" (Issue 3)
+
+`RoutingBadge.tsx` collapsed two semantically distinct routing-strategy outcomes onto the same i18n key `routingPriorityExcludedQuota` ("Quota exhausted"):
+
+- **True 429-driven exhaustion** (`reason === "quota_exhausted_unknown_reset"`) — account is actually depleted.
+- **Routing-only threshold exclusion** (`reason` contains `<5%`) — account works fine, just deprioritized below the routing-strategy floor.
+
+A user observed an OpenAI Codex row showing the badge "Quota exhausted" when actual session was at 58% remaining and weekly was at 2% remaining (low but non-zero). The badge wording suggested the account was unusable when in reality it was just routing-deprioritized. Fix:
+
+- `getExcludedI18nKey()` mapping in `RoutingBadge.tsx` now emits `routingPriorityExcludedExhausted` for the true 429 case and `routingPriorityExcludedLowQuota` for the `<5%` threshold case. The two are visually identical for now (both use the existing red error-style badge variant) but their text is distinct: "Quota exhausted" vs "Low quota".
+- `en.json` + `ko.json` got distinct hand-written translations. The other 30 locale files have the same key structure but use English fallback (`"Quota exhausted"` / `"Low quota"`) — explicit user-scope decision: keep this PR's i18n surface minimal; localized translations are a follow-up i18n PR concern, not a bug-fix concern.
+- The deprecated `routingPriorityExcludedQuota` key is removed from all 32 locale files — a static unit test enforces both the presence of the new keys and the absence of the old key.
+
+### Tests
+
+- `tests/unit/logger-transport-fallback.test.mjs` — `verifyLogDirWritable` writable / TARGET_IS_DIR / ENOENT / EACCES (skipped on root) / cleanup-across-50-iterations; `ensureLogDir` tri-state; `initLogRotation` disabled / enabled / not_writable+detail; existing-file append-mode probe; APP_LOG_LEVEL sanitization.
+- `tests/unit/v1-routes-no-init-translators.test.mjs`.
+- `tests/unit/anthropic-refresh-classification.test.mjs` (19 cases) — 200 ok / 200 soft_failure / 400 invalid_grant / unauthorized_client / revoked / bad_request / 401 plain / 401 invalid_grant override / 403 / 408 / 429 / 500 / 503 / network / 418-uncommon, plus 3 legacy back-compat cases.
+- `tests/unit/anthropic-refresh-retry.test.mjs` (6 cases) — ok-no-retry / permanent-no-retry / transient×3-then-ok / transient×3-exhausted / transient-then-permanent / network×3-exhausted (call-count and result-status assertions).
+- `tests/unit/usage-provider-limits-warnings.test.mjs` — `mergeIntoResponseBody` warnings preservation, RefreshWarning shape contract.
+- `tests/unit/provider-limits-ui-warning.test.mjs` (6 cases) — UI state machine: warning preserves quotaData, success clears warning, permanent 401 clears stale amber, refreshAll full-replace, idempotency.
+- `tests/unit/routing-badge-mapping.test.mjs` (9 cases) — `getExcludedI18nKey()` returns the new `Exhausted` / `LowQuota` keys for the right inputs, never the deprecated `Quota` key.
+- `tests/unit/routing-badge-i18n-coverage.test.mjs` (4 cases) — all 32 locale files have both new keys, none retains the deprecated key.
+
+### Apex-compatible Sub-Agent Review (Anthropic Opus 4.7 path)
+
+Real GitHub Copilot reviewer was over weekly quota; OpenAI-routed Oracle sub-agents were unavailable. Performed final pre-merge gate using Anthropic-Opus-primary sub-agents (Metis + Sisyphus-Junior under category `unspecified-high`). Findings:
+
+- **M3 (DEFECT)**: `refreshClaudeOAuthTokenWithRetry` worst case 93s/connection (30s × 3 attempts + 1s + 2s backoff) caused `syncAllProviderLimits` batch to risk reverse-proxy 504 timeouts (nginx default 60s, Cloudflare 100s) for multi-Anthropic-account users — the exact failure mode this PR was designed to handle gracefully. Fixed by introducing `claudeMaxRetries` parameter on `refreshAndUpdateCredentials` / `fetchLiveProviderLimits`. Batch (`syncAllProviderLimits`) now passes `2` (worst case ~62s/connection); per-row interactive refresh keeps the default `3` (user actively waiting).
+- **M1 (NIT, internal API hygiene)**: `toProviderLimitsCacheEntry` ignored `live.usage.fetchedAt` and used `new Date().toISOString()` default. While `mergeIntoResponseBody` already shielded clients (it overwrites `caches` with disk view), the `caches` map returned by `syncAllProviderLimits` to internal callers was misleading. Fixed by forwarding `live.usage.fetchedAt` (when string) into the third argument; undefined falls back to NOW.
+- **2 regression unit tests added**.
+
+### Tests (final)
+
+- 2 cases added in `tests/unit/usage-provider-limits-warnings.test.mjs` (M1 fetchedAt forward + M3 claudeMaxRetries option contract).
+- All other findings from the two sub-agent reviews are NITs deferred to follow-up PRs (`AmberRefreshBadge` ISO-string tooltip humanization, `getLogConfig()` dead `||` fallback, `withTimeout` zombie-fetch cancellation, etc.).
+
+### Versions
+
+- gateway: 3.8.7 → 3.8.8
+- docs/openapi.yaml: 3.8.7 → 3.8.8
+
+---
+
 ## [3.8.7] — 2026-05-08
 
 ### 🔒 Routing — session affinity real fix (D1 + D2 + D3)

@@ -35,7 +35,7 @@ function formatNum(value: number | null | undefined, digits = 0): string {
   return value.toFixed(digits);
 }
 
-function getExcludedI18nKey(reason: string | null): string {
+export function getExcludedI18nKey(reason: string | null): string {
   switch (reason) {
     case "inactive":
       return "routingPriorityExcludedInactive";
@@ -44,9 +44,9 @@ function getExcludedI18nKey(reason: string | null): string {
     case "terminal":
       return "routingPriorityExcludedTerminal";
     case "quota_exhausted_unknown_reset":
-      return "routingPriorityExcludedQuota";
+      return "routingPriorityExcludedExhausted";
     default:
-      if (reason && reason.includes("<5%")) return "routingPriorityExcludedQuota";
+      if (reason && reason.includes("<5%")) return "routingPriorityExcludedLowQuota";
       return "routingPriorityExcludedUnknown";
   }
 }

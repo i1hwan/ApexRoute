@@ -1,29 +1,12 @@
 import { CORS_ORIGIN, CORS_HEADERS } from "@/shared/utils/cors";
 import { callCloudWithMachineId } from "@/shared/utils/cloud";
 import { handleChat } from "@/sse/handlers/chat";
-import { initTranslators } from "@omniroute/open-sse/translator/index.ts";
 import { createInjectionGuard } from "@/middleware/promptInjectionGuard";
 
-let initPromise = null;
+// initTranslators() removed — see /v1/responses/route.ts (#450, PR #29).
 
-// Singleton injection guard instance
 const injectionGuard = createInjectionGuard();
 
-/**
- * Initialize translators once (Promise-based singleton — no race condition)
- */
-function ensureInitialized() {
-  if (!initPromise) {
-    initPromise = Promise.resolve(initTranslators()).then(() => {
-      console.log("[SSE] Translators initialized");
-    });
-  }
-  return initPromise;
-}
-
-/**
- * Handle CORS preflight
- */
 export async function OPTIONS() {
   return new Response(null, {
     headers: {
@@ -35,8 +18,6 @@ export async function OPTIONS() {
 }
 
 export async function POST(request) {
-  await ensureInitialized();
-
   // Prompt injection guard — inspect body before forwarding
   try {
     const cloned = request.clone();
