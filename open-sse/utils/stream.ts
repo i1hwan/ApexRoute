@@ -59,14 +59,17 @@ type StreamOptions = {
   apiKeyInfo?: unknown;
   body?: unknown;
   onComplete?: ((payload: StreamCompletePayload) => void) | null;
+  toolArgumentMode?: "stream-normalized" | "buffered-final";
+  forwardingLane?: "claude-oauth-prefixed" | null;
 };
 
 type TranslateState = ReturnType<typeof initState> & {
   provider?: string | null;
   toolNameMap?: unknown;
+  toolArgumentMode?: "stream-normalized" | "buffered-final";
+  forwardingLane?: "claude-oauth-prefixed" | null;
   usage?: unknown;
   finishReason?: unknown;
-  /** Accumulated message content for call log response body */
   accumulatedContent?: string;
   upstreamError?: {
     status: number;
@@ -149,6 +152,8 @@ export function createSSEStream(options: StreamOptions = {}) {
     apiKeyInfo = null,
     body = null,
     onComplete = null,
+    toolArgumentMode = "stream-normalized",
+    forwardingLane = null,
   } = options;
 
   let buffer = "";
@@ -166,6 +171,8 @@ export function createSSEStream(options: StreamOptions = {}) {
           ...(initState(sourceFormat) as TranslateState),
           provider,
           toolNameMap,
+          toolArgumentMode,
+          forwardingLane,
           accumulatedContent: "",
         }
       : null;
@@ -978,7 +985,9 @@ export function createSSETransformStreamWithLogger(
   connectionId: string | null = null,
   body: unknown = null,
   onComplete: ((payload: StreamCompletePayload) => void) | null = null,
-  apiKeyInfo: unknown = null
+  apiKeyInfo: unknown = null,
+  toolArgumentMode: "stream-normalized" | "buffered-final" = "stream-normalized",
+  forwardingLane: "claude-oauth-prefixed" | null = null
 ) {
   return createSSEStream({
     mode: STREAM_MODE.TRANSLATE,
@@ -992,6 +1001,8 @@ export function createSSETransformStreamWithLogger(
     apiKeyInfo,
     body,
     onComplete,
+    toolArgumentMode,
+    forwardingLane,
   });
 }
 

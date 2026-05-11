@@ -1028,6 +1028,7 @@ export async function handleChatCore({
         translatedBody = lexicalRewrite.body;
         if (lexicalRewrite.toolNameMap) {
           translatedBody._toolNameMap = lexicalRewrite.toolNameMap;
+          translatedBody._forwardingLane = "claude-oauth-prefixed";
         }
       }
 
@@ -1073,6 +1074,7 @@ export async function handleChatCore({
         translatedBody = lexicalRewrite.body;
         if (lexicalRewrite.toolNameMap) {
           translatedBody._toolNameMap = lexicalRewrite.toolNameMap;
+          translatedBody._forwardingLane = "claude-oauth-prefixed";
         }
       }
       log?.debug?.("FORMAT", "claude->openai->claude normalized passthrough");
@@ -1240,7 +1242,10 @@ export async function handleChatCore({
     translatedToolNameMap instanceof Map && translatedToolNameMap.size > 0
       ? translatedToolNameMap
       : nativeClaudeToolNameMap;
+  const forwardingLane =
+    typeof translatedBody._forwardingLane === "string" ? translatedBody._forwardingLane : null;
   delete translatedBody._toolNameMap;
+  delete translatedBody._forwardingLane;
   delete translatedBody._disableToolPrefix;
 
   // Update model in body — use resolved alias so the provider gets the correct model ID (#472)
@@ -2437,8 +2442,17 @@ export async function handleChatCore({
       apiKeyInfo
     );
   } else if (needsTranslation(targetFormat, clientResponseFormat)) {
-    // Standard translation for other providers
     log?.debug?.("STREAM", `Translation mode: ${targetFormat} → ${clientResponseFormat}`);
+    const { resolveToolArgumentMode } = await import("../translator/helpers/toolArgumentMode.ts");
+    const { getSettings } = await import("@/lib/localDb");
+    const settings = await getSettings().catch(() => ({}));
+    const toolArgumentMode = resolveToolArgumentMode(
+      (settings as { toolArgumentMode?: unknown })?.toolArgumentMode as
+        | Parameters<typeof resolveToolArgumentMode>[0]
+        | undefined,
+      provider,
+      forwardingLane as "claude-oauth-prefixed" | null
+    );
     transformStream = createSSETransformStreamWithLogger(
       targetFormat,
       clientResponseFormat,
@@ -2449,7 +2463,9 @@ export async function handleChatCore({
       connectionId,
       body,
       onStreamComplete,
-      apiKeyInfo
+      apiKeyInfo,
+      toolArgumentMode,
+      forwardingLane as "claude-oauth-prefixed" | null
     );
   } else {
     log?.debug?.("STREAM", `Standard passthrough mode`);

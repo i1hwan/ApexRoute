@@ -95,9 +95,14 @@ export function claudeToOpenAIResponse(chunk, state) {
           },
         };
         state.toolCalls.set(chunk.index, toolCall);
-        if (!state.toolArgNormalizers) state.toolArgNormalizers = new Map();
-        state.toolArgNormalizers.set(chunk.index, createJsonUnicodeNormalizer());
-        results.push(createChunk(state, { tool_calls: [toolCall] }));
+        if (state.toolArgumentMode === "buffered-final") {
+          // Defer emit until content_block_stop. No normalizer needed —
+          // raw partial_json is concatenated as-is.
+        } else {
+          if (!state.toolArgNormalizers) state.toolArgNormalizers = new Map();
+          state.toolArgNormalizers.set(chunk.index, createJsonUnicodeNormalizer());
+          results.push(createChunk(state, { tool_calls: [toolCall] }));
+        }
       }
       break;
     }
@@ -113,22 +118,28 @@ export function claudeToOpenAIResponse(chunk, state) {
       } else if (delta?.type === "input_json_delta" && delta.partial_json) {
         const toolCall = state.toolCalls.get(chunk.index);
         if (toolCall) {
-          // Fallback to verbatim forwarding if normalizer is missing —
-          // preserves pre-fix behaviour for legacy state shapes.
-          const normalizer = state.toolArgNormalizers?.get(chunk.index);
-          const normalized = normalizer ? normalizer.write(delta.partial_json) : delta.partial_json;
-          toolCall.function.arguments += normalized;
-          if (normalized.length > 0) {
-            results.push(
-              createChunk(state, {
-                tool_calls: [
-                  {
-                    index: toolCall.index,
-                    function: { arguments: normalized },
-                  },
-                ],
-              })
-            );
+          if (state.toolArgumentMode === "buffered-final") {
+            toolCall.function.arguments += delta.partial_json;
+          } else {
+            // Fallback to verbatim forwarding if normalizer is missing —
+            // preserves pre-fix behaviour for legacy state shapes.
+            const normalizer = state.toolArgNormalizers?.get(chunk.index);
+            const normalized = normalizer
+              ? normalizer.write(delta.partial_json)
+              : delta.partial_json;
+            toolCall.function.arguments += normalized;
+            if (normalized.length > 0) {
+              results.push(
+                createChunk(state, {
+                  tool_calls: [
+                    {
+                      index: toolCall.index,
+                      function: { arguments: normalized },
+                    },
+                  ],
+                })
+              );
+            }
           }
         }
       }
@@ -143,6 +154,31 @@ export function claudeToOpenAIResponse(chunk, state) {
       }
       state.textBlockStarted = false;
       state.thinkingBlockStarted = false;
+
+      const toolCallAtIndex = state.toolCalls.get(chunk.index);
+
+      if (state.toolArgumentMode === "buffered-final" && toolCallAtIndex) {
+        // Emit a single full chunk that carries id + type + name + the entire
+        // accumulated arguments. OpenAI-compat clients accumulate
+        // tool_calls.function.arguments via `+=`, so a single emit equals one
+        // append on the client side (matches Vercel AI SDK / Lobe / Cursor).
+        results.push(
+          createChunk(state, {
+            tool_calls: [
+              {
+                index: toolCallAtIndex.index,
+                id: toolCallAtIndex.id,
+                type: "function",
+                function: {
+                  name: toolCallAtIndex.function.name,
+                  arguments: toolCallAtIndex.function.arguments,
+                },
+              },
+            ],
+          })
+        );
+        break;
+      }
 
       // Flush any tail buffered by the tool-arg normalizer (incomplete \u
       // escape, unpaired high surrogate). Remove ONLY the sidecar entry —
