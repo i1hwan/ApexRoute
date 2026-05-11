@@ -2271,7 +2271,8 @@
     "compatibilityAddLaneOverride": "Lane 재정의 추가",
     "compatibilitySelectProvider": "프로바이더 선택",
     "compatibilitySelectLane": "Lane 선택",
-    "compatibilityNoOverrides": "모든 프로바이더에 기본값 사용 중"
+    "compatibilityNoOverrides": "모든 프로바이더에 기본값 사용 중",
+    "compatibilityLowQuotaProviderScopeOnlyHint": "프로바이더 범위 전용 — 계정 선택이 lane 결정보다 먼저 일어나기 때문에 lane 재정의는 적용되지 않습니다. provider=\"claude\"=true 로 OAuth lane 도 함께 커버하세요."
   },
   "translator": {
     "title": "번역기",

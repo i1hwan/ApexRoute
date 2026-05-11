@@ -59,6 +59,7 @@ const REQUIRED_KEYS = [
   "compatibilityLowQuotaModeBypass",
   "compatibilityLowQuotaByProviderLabel",
   "compatibilityLowQuotaByLaneLabel",
+  "compatibilityLowQuotaProviderScopeOnlyHint",
   "compatibilitySseDiagnosticsTitle",
   "compatibilitySseDiagnosticsDescription",
   "compatibilitySseDiagnosticsRawLines",

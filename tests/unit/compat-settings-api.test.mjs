@@ -98,6 +98,23 @@ test("schemas reject unknown provider keys at type level (canonical id whitelist
   assert.match(source, /providerOverrideRecord/);
 });
 
+test("lowQuotaBypassSettingsSchema is strict (rev3.3 — rejects byLane field)", async () => {
+  const { lowQuotaBypassSettingsSchema } =
+    await import("../../src/shared/validation/settingsSchemas.ts");
+  const goodResult = lowQuotaBypassSettingsSchema.safeParse({
+    default: true,
+    byProvider: { claude: true },
+  });
+  assert.equal(goodResult.success, true);
+
+  const withByLane = lowQuotaBypassSettingsSchema.safeParse({
+    default: true,
+    byProvider: { claude: true },
+    byLane: { "claude-oauth-prefixed": true },
+  });
+  assert.equal(withByLane.success, false);
+});
+
 test("Subsection components fetch their own endpoint", () => {
   const toolArgs = readFileSync(
     join(

@@ -9,17 +9,13 @@ import OverrideTable from "./OverrideTable";
 interface LowQuotaBypassSettings {
   default: boolean;
   byProvider: Record<string, boolean>;
-  byLane: Record<string, boolean>;
 }
 
 const ENDPOINT = "/api/settings/low-quota-bypass";
 
-const SUPPORTED_LANES = ["claude-oauth-prefixed"] as const;
-
 const DEFAULT_STATE: LowQuotaBypassSettings = {
   default: false,
   byProvider: {},
-  byLane: {},
 };
 
 export default function LowQuotaBypassSection() {
@@ -116,6 +112,9 @@ export default function LowQuotaBypassSection() {
           <label className="block text-sm font-medium mb-2">
             {t("compatibilityLowQuotaByProviderLabel")}
           </label>
+          <p className="text-xs text-text-muted mb-2">
+            {t("compatibilityLowQuotaProviderScopeOnlyHint")}
+          </p>
           <OverrideTable<boolean>
             overrides={state.byProvider}
             availableKeys={USAGE_SUPPORTED_PROVIDERS}
@@ -128,26 +127,6 @@ export default function LowQuotaBypassSection() {
             emptyStateLabel={t("compatibilityNoOverrides")}
             disabled={disabled}
             onChange={(byProvider) => persist({ ...state, byProvider })}
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium mb-2">
-            {t("compatibilityLowQuotaByLaneLabel")}
-          </label>
-          <p className="text-xs text-text-muted mb-2">{t("compatibilityToolArgsByLaneHint")}</p>
-          <OverrideTable<boolean>
-            overrides={state.byLane}
-            availableKeys={SUPPORTED_LANES}
-            valueOptions={boolOptions}
-            defaultNewValue={true}
-            keyColumnLabel={t("compatibilityLaneColumn")}
-            valueColumnLabel={t("compatibilityModeColumn")}
-            addButtonLabel={t("compatibilityAddLaneOverride")}
-            selectKeyPlaceholder={t("compatibilitySelectLane")}
-            emptyStateLabel={t("compatibilityNoOverrides")}
-            disabled={disabled}
-            onChange={(byLane) => persist({ ...state, byLane })}
           />
         </div>
       </div>

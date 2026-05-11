@@ -2350,7 +2350,8 @@
     "compatibilityAddLaneOverride": "Add lane override",
     "compatibilitySelectProvider": "Select a provider",
     "compatibilitySelectLane": "Select a lane",
-    "compatibilityNoOverrides": "Using default for all providers"
+    "compatibilityNoOverrides": "Using default for all providers",
+    "compatibilityLowQuotaProviderScopeOnlyHint": "Provider scope only — lane overrides are not applicable here because account selection runs before the lane is determined. Set provider=\"claude\"=true to cover the OAuth lane too."
   },
   "translator": {
     "title": "Translator",

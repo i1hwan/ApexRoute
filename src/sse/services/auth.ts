@@ -19,6 +19,7 @@ import {
 } from "@omniroute/open-sse/services/accountFallback.ts";
 import { isTerminalConnectionStatus } from "@/sse/services/accountTerminalStatus";
 import { selectByEarliestResetFirst } from "@/sse/services/strategies/earliestResetFirst";
+import { resolveLowQuotaBypass } from "@omniroute/open-sse/services/routing/lowQuotaBypass.ts";
 import {
   isLocalProvider,
   getPassthroughProviders,
@@ -706,10 +707,15 @@ export async function getProviderCredentials(
       // dropped the modelHint parameter — model-specific weekly windows are
       // no longer consulted for ranking or hard exclusion. See
       // .sisyphus/plans/routing-strategy-v6.md and earliestResetFirst.ts.
+      const lowQuotaBypassSettings = (settings as { lowQuotaBypass?: unknown })?.lowQuotaBypass as
+        | Parameters<typeof resolveLowQuotaBypass>[0]
+        | undefined;
+      const lowQuotaBypass = resolveLowQuotaBypass(lowQuotaBypassSettings, provider);
       const result = selectByEarliestResetFirst(
         orderedConnections,
         options.sessionId || null,
-        provider
+        provider,
+        lowQuotaBypass
       );
       if ("allExcluded" in result) {
         log.warn(

@@ -26,11 +26,12 @@ export const toolArgumentModeSettingsSchema = z.object({
   byLane: laneOverrideRecord(toolArgumentModeValueSchema),
 });
 
-export const lowQuotaBypassSettingsSchema = z.object({
-  default: z.boolean(),
-  byProvider: providerOverrideRecord(z.boolean()),
-  byLane: laneOverrideRecord(z.boolean()),
-});
+export const lowQuotaBypassSettingsSchema = z
+  .object({
+    default: z.boolean(),
+    byProvider: providerOverrideRecord(z.boolean()),
+  })
+  .strict();
 
 export const sseDiagnosticsSettingsSchema = z.object({
   captureProviderRawSSELines: z.boolean(),
@@ -54,7 +55,6 @@ export const TOOL_ARGUMENT_MODE_DEFAULT: ToolArgumentModeSettings = {
 export const LOW_QUOTA_BYPASS_DEFAULT: LowQuotaBypassSettings = {
   default: false,
   byProvider: {},
-  byLane: {},
 };
 
 export const SSE_DIAGNOSTICS_DEFAULT: SseDiagnosticsSettings = {

@@ -9,7 +9,7 @@ INSERT OR IGNORE INTO key_value (namespace, key, value)
 VALUES (
   'settings',
   'lowQuotaBypass',
-  '{"default":false,"byProvider":{},"byLane":{}}'
+  '{"default":false,"byProvider":{}}'
 );
 
 INSERT OR IGNORE INTO key_value (namespace, key, value)
