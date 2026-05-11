@@ -2453,6 +2453,17 @@ export async function handleChatCore({
       provider,
       forwardingLane as "claude-oauth-prefixed" | null
     );
+    const sseDiagnosticsConfig =
+      ((settings as { sseDiagnostics?: unknown })?.sseDiagnostics as
+        | {
+            captureProviderRawSSELines: boolean;
+            captureProviderParsedEvents: boolean;
+            captureTranslatedOpenAISSE: boolean;
+            keepLastNDebugRequests: number;
+            maxDebugBundleSizeMB: number;
+            maxActiveDebugBundles: number;
+          }
+        | undefined) ?? null;
     transformStream = createSSETransformStreamWithLogger(
       targetFormat,
       clientResponseFormat,
@@ -2465,7 +2476,8 @@ export async function handleChatCore({
       onStreamComplete,
       apiKeyInfo,
       toolArgumentMode,
-      forwardingLane as "claude-oauth-prefixed" | null
+      forwardingLane as "claude-oauth-prefixed" | null,
+      sseDiagnosticsConfig
     );
   } else {
     log?.debug?.("STREAM", `Standard passthrough mode`);

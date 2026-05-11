@@ -27,6 +27,13 @@ import {
   extractThinkingFromContent,
 } from "../handlers/responseSanitizer.ts";
 import { buildErrorBody } from "./error.ts";
+import {
+  tryCreateBundle,
+  appendRawLine,
+  appendParsedEvent,
+  appendTranslatedChunk,
+  finalizeBundle,
+} from "./sseDiagnosticsBundle.ts";
 
 export { COLORS, formatSSE };
 
@@ -61,6 +68,14 @@ type StreamOptions = {
   onComplete?: ((payload: StreamCompletePayload) => void) | null;
   toolArgumentMode?: "stream-normalized" | "buffered-final";
   forwardingLane?: "claude-oauth-prefixed" | null;
+  sseDiagnosticsConfig?: {
+    captureProviderRawSSELines: boolean;
+    captureProviderParsedEvents: boolean;
+    captureTranslatedOpenAISSE: boolean;
+    keepLastNDebugRequests: number;
+    maxDebugBundleSizeMB: number;
+    maxActiveDebugBundles: number;
+  } | null;
 };
 
 type TranslateState = ReturnType<typeof initState> & {
@@ -154,7 +169,18 @@ export function createSSEStream(options: StreamOptions = {}) {
     onComplete = null,
     toolArgumentMode = "stream-normalized",
     forwardingLane = null,
+    sseDiagnosticsConfig = null,
   } = options;
+
+  const diagnosticsBundle = sseDiagnosticsConfig
+    ? tryCreateBundle(sseDiagnosticsConfig, {
+        provider,
+        model,
+        targetFormat: targetFormat ?? null,
+        sourceFormat: sourceFormat ?? null,
+      })
+    : null;
+  let providerLineCounter = 0;
 
   let buffer = "";
   let usage: UsageTokenRecord | null = null;
@@ -222,6 +248,9 @@ export function createSSEStream(options: StreamOptions = {}) {
               }).catch(() => {});
               const timeoutError = new Error(timeoutMsg);
               timeoutError.name = "StreamIdleTimeoutError";
+              if (diagnosticsBundle) {
+                void finalizeBundle(diagnosticsBundle, "upstream_error", timeoutMsg);
+              }
               controller.error(timeoutError);
             }
           }, 10_000);
@@ -241,7 +270,10 @@ export function createSSEStream(options: StreamOptions = {}) {
         for (const line of lines) {
           const trimmed = line.trim();
 
-          // Passthrough mode: normalize and forward
+          if (diagnosticsBundle && trimmed.startsWith("data:")) {
+            appendRawLine(diagnosticsBundle, providerLineCounter++, line);
+          }
+
           if (mode === STREAM_MODE.PASSTHROUGH) {
             let output;
             let injectedUsage = false;
@@ -489,6 +521,7 @@ export function createSSEStream(options: StreamOptions = {}) {
           const parsed = parseSSELine(trimmed);
           if (!parsed) continue;
           providerPayloadCollector.push(parsed);
+          appendParsedEvent(diagnosticsBundle, parsed);
 
           if (parsed && parsed.done) {
             if (!doneSent) {
@@ -669,6 +702,7 @@ export function createSSEStream(options: StreamOptions = {}) {
 
               const output = formatSSE(itemSanitized, sourceFormat);
               clientPayloadCollector.push(itemSanitized);
+              appendTranslatedChunk(diagnosticsBundle, itemSanitized);
               reqLogger?.appendConvertedChunk?.(output);
               controller.enqueue(encoder.encode(output));
             }
@@ -845,6 +879,13 @@ export function createSSEStream(options: StreamOptions = {}) {
               } catch {}
             }
 
+            if (diagnosticsBundle) {
+              void finalizeBundle(
+                diagnosticsBundle,
+                "upstream_error",
+                err.message || "Upstream failure"
+              );
+            }
             controller.error(new Error(err.message || "Upstream failure"));
             return;
           }
@@ -964,6 +1005,10 @@ export function createSSEStream(options: StreamOptions = {}) {
           }
         } catch (error) {
           console.log(`[STREAM] Error in flush (${model || "unknown"}):`, error.message || error);
+        } finally {
+          if (diagnosticsBundle) {
+            void finalizeBundle(diagnosticsBundle, streamTimedOut ? "upstream_error" : "flush");
+          }
         }
       },
     },
@@ -987,7 +1032,8 @@ export function createSSETransformStreamWithLogger(
   onComplete: ((payload: StreamCompletePayload) => void) | null = null,
   apiKeyInfo: unknown = null,
   toolArgumentMode: "stream-normalized" | "buffered-final" = "stream-normalized",
-  forwardingLane: "claude-oauth-prefixed" | null = null
+  forwardingLane: "claude-oauth-prefixed" | null = null,
+  sseDiagnosticsConfig: StreamOptions["sseDiagnosticsConfig"] = null
 ) {
   return createSSEStream({
     mode: STREAM_MODE.TRANSLATE,
@@ -1003,6 +1049,7 @@ export function createSSETransformStreamWithLogger(
     onComplete,
     toolArgumentMode,
     forwardingLane,
+    sseDiagnosticsConfig,
   });
 }
 
