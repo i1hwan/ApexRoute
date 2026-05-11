@@ -7,6 +7,64 @@
  */
 import { z } from "zod";
 import { HIDEABLE_SIDEBAR_ITEM_IDS } from "@/shared/constants/sidebarVisibility";
+import { USAGE_SUPPORTED_PROVIDERS } from "@/shared/constants/providers";
+
+const SUPPORTED_PROVIDER_VALUES = USAGE_SUPPORTED_PROVIDERS as readonly [string, ...string[]];
+const SUPPORTED_LANE_VALUES = ["claude-oauth-prefixed"] as const;
+
+const providerOverrideRecord = <V extends z.ZodTypeAny>(valueSchema: V) =>
+  z.record(z.enum(SUPPORTED_PROVIDER_VALUES), valueSchema);
+
+const laneOverrideRecord = <V extends z.ZodTypeAny>(valueSchema: V) =>
+  z.record(z.enum(SUPPORTED_LANE_VALUES), valueSchema);
+
+const toolArgumentModeValueSchema = z.enum(["stream-normalized", "buffered-final"]);
+
+export const toolArgumentModeSettingsSchema = z.object({
+  default: toolArgumentModeValueSchema,
+  byProvider: providerOverrideRecord(toolArgumentModeValueSchema),
+  byLane: laneOverrideRecord(toolArgumentModeValueSchema),
+});
+
+export const lowQuotaBypassSettingsSchema = z.object({
+  default: z.boolean(),
+  byProvider: providerOverrideRecord(z.boolean()),
+  byLane: laneOverrideRecord(z.boolean()),
+});
+
+export const sseDiagnosticsSettingsSchema = z.object({
+  captureProviderRawSSELines: z.boolean(),
+  captureProviderParsedEvents: z.boolean(),
+  captureTranslatedOpenAISSE: z.boolean(),
+  keepLastNDebugRequests: z.number().int().min(1).max(1000),
+  maxDebugBundleSizeMB: z.number().int().min(1).max(1000),
+  maxActiveDebugBundles: z.number().int().min(1).max(50),
+});
+
+export type ToolArgumentModeSettings = z.infer<typeof toolArgumentModeSettingsSchema>;
+export type LowQuotaBypassSettings = z.infer<typeof lowQuotaBypassSettingsSchema>;
+export type SseDiagnosticsSettings = z.infer<typeof sseDiagnosticsSettingsSchema>;
+
+export const TOOL_ARGUMENT_MODE_DEFAULT: ToolArgumentModeSettings = {
+  default: "stream-normalized",
+  byProvider: {},
+  byLane: {},
+};
+
+export const LOW_QUOTA_BYPASS_DEFAULT: LowQuotaBypassSettings = {
+  default: false,
+  byProvider: {},
+  byLane: {},
+};
+
+export const SSE_DIAGNOSTICS_DEFAULT: SseDiagnosticsSettings = {
+  captureProviderRawSSELines: false,
+  captureProviderParsedEvents: false,
+  captureTranslatedOpenAISSE: false,
+  keepLastNDebugRequests: 20,
+  maxDebugBundleSizeMB: 100,
+  maxActiveDebugBundles: 5,
+};
 
 const forwardingKeywordRuleSchema = z.object({
   match: z.string().trim().min(1).max(200),

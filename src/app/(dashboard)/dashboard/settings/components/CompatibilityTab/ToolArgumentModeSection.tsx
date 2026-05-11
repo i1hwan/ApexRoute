@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Card } from "@/shared/components";
 import { useTranslations } from "next-intl";
 import { USAGE_SUPPORTED_PROVIDERS } from "@/shared/constants/providers";
@@ -8,18 +8,69 @@ import OverrideTable from "./OverrideTable";
 
 type Mode = "stream-normalized" | "buffered-final";
 
+interface ToolArgumentModeSettings {
+  default: Mode;
+  byProvider: Record<string, Mode>;
+  byLane: Record<string, Mode>;
+}
+
+const ENDPOINT = "/api/settings/tool-argument-mode";
+
 const SUPPORTED_LANES = ["claude-oauth-prefixed"] as const;
+
+const DEFAULT_STATE: ToolArgumentModeSettings = {
+  default: "stream-normalized",
+  byProvider: {},
+  byLane: {},
+};
 
 export default function ToolArgumentModeSection() {
   const t = useTranslations("settings");
-  const [defaultMode, setDefaultMode] = useState<Mode>("stream-normalized");
-  const [byProvider, setByProvider] = useState<Record<string, Mode>>({});
-  const [byLane, setByLane] = useState<Record<string, Mode>>({});
+  const [state, setState] = useState<ToolArgumentModeSettings>(DEFAULT_STATE);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    fetch(ENDPOINT)
+      .then((res) => res.json())
+      .then((data: ToolArgumentModeSettings) => {
+        setState(data);
+        setLoading(false);
+      })
+      .catch((err) => {
+        console.error("ToolArgumentMode: failed to load settings:", err);
+        setLoading(false);
+      });
+  }, []);
+
+  const persist = async (next: ToolArgumentModeSettings) => {
+    const previous = state;
+    setState(next);
+    setSaving(true);
+    try {
+      const res = await fetch(ENDPOINT, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(next),
+      });
+      if (!res.ok) {
+        setState(previous);
+        console.error("ToolArgumentMode: PUT failed:", await res.text());
+      }
+    } catch (err) {
+      setState(previous);
+      console.error("ToolArgumentMode: PUT error:", err);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const modeOptions = [
     { value: "stream-normalized" as Mode, label: t("compatibilityToolArgsModeStreamNormalized") },
     { value: "buffered-final" as Mode, label: t("compatibilityToolArgsModeBufferedFinal") },
   ];
+
+  const disabled = loading || saving;
 
   return (
     <Card>
@@ -42,19 +93,20 @@ export default function ToolArgumentModeSection() {
             {modeOptions.map((opt) => (
               <button
                 key={opt.value}
-                onClick={() => setDefaultMode(opt.value)}
+                disabled={disabled}
+                onClick={() => persist({ ...state, default: opt.value })}
                 className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-all ${
-                  defaultMode === opt.value
+                  state.default === opt.value
                     ? "border-blue-500/50 bg-blue-500/5 ring-1 ring-blue-500/20"
                     : "border-border/50 hover:border-border hover:bg-surface/30"
-                }`}
+                } disabled:opacity-60`}
               >
                 <span
                   className={`material-symbols-outlined text-[18px] ${
-                    defaultMode === opt.value ? "text-blue-400" : "text-text-muted"
+                    state.default === opt.value ? "text-blue-400" : "text-text-muted"
                   }`}
                 >
-                  {defaultMode === opt.value ? "radio_button_checked" : "radio_button_unchecked"}
+                  {state.default === opt.value ? "radio_button_checked" : "radio_button_unchecked"}
                 </span>
                 <span className="text-left">{opt.label}</span>
               </button>
@@ -67,7 +119,7 @@ export default function ToolArgumentModeSection() {
             {t("compatibilityToolArgsByProviderLabel")}
           </label>
           <OverrideTable<Mode>
-            overrides={byProvider}
+            overrides={state.byProvider}
             availableKeys={USAGE_SUPPORTED_PROVIDERS}
             valueOptions={modeOptions}
             defaultNewValue="buffered-final"
@@ -76,7 +128,8 @@ export default function ToolArgumentModeSection() {
             addButtonLabel={t("compatibilityAddProviderOverride")}
             selectKeyPlaceholder={t("compatibilitySelectProvider")}
             emptyStateLabel={t("compatibilityNoOverrides")}
-            onChange={setByProvider}
+            disabled={disabled}
+            onChange={(byProvider) => persist({ ...state, byProvider })}
           />
         </div>
 
@@ -86,7 +139,7 @@ export default function ToolArgumentModeSection() {
           </label>
           <p className="text-xs text-text-muted mb-2">{t("compatibilityToolArgsByLaneHint")}</p>
           <OverrideTable<Mode>
-            overrides={byLane}
+            overrides={state.byLane}
             availableKeys={SUPPORTED_LANES}
             valueOptions={modeOptions}
             defaultNewValue="buffered-final"
@@ -95,7 +148,8 @@ export default function ToolArgumentModeSection() {
             addButtonLabel={t("compatibilityAddLaneOverride")}
             selectKeyPlaceholder={t("compatibilitySelectLane")}
             emptyStateLabel={t("compatibilityNoOverrides")}
-            onChange={setByLane}
+            disabled={disabled}
+            onChange={(byLane) => persist({ ...state, byLane })}
           />
         </div>
       </div>
