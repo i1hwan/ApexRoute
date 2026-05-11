@@ -7,6 +7,11 @@ import { backupDbFile } from "./backup";
 import { PROVIDER_ID_TO_ALIAS } from "@omniroute/open-sse/config/providerModels.ts";
 import { invalidateDbCache } from "./readCache";
 import { resolveProxyForConnectionFromRegistry } from "./proxies";
+import {
+  TOOL_ARGUMENT_MODE_DEFAULT,
+  LOW_QUOTA_BYPASS_DEFAULT,
+  SSE_DIAGNOSTICS_DEFAULT,
+} from "@/shared/validation/settingsSchemas";
 
 type JsonRecord = Record<string, unknown>;
 type PricingModels = Record<string, JsonRecord>;
@@ -48,6 +53,9 @@ export async function getSettings() {
     hiddenSidebarItems: [],
     alwaysPreserveClientCache: "auto",
     idempotencyWindowMs: 5000,
+    toolArgumentMode: TOOL_ARGUMENT_MODE_DEFAULT,
+    lowQuotaBypass: LOW_QUOTA_BYPASS_DEFAULT,
+    sseDiagnostics: SSE_DIAGNOSTICS_DEFAULT,
   };
   for (const row of rows) {
     const record = toRecord(row);

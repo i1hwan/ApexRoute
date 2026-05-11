@@ -71,6 +71,7 @@ import { invalidateCodexQuotaCache } from "../services/codexQuotaFetcher.ts";
 import { translateNonStreamingResponse } from "./responseTranslator.ts";
 import { extractUsageFromResponse } from "./usageExtractor.ts";
 import { applyClaudeOAuthLexicalRewrite } from "../translator/helpers/claudeHelper.ts";
+import { isValidForwardingLane } from "../translator/helpers/toolArgumentMode.ts";
 import {
   parseSSEToClaudeResponse,
   parseSSEToOpenAIResponse,
@@ -174,6 +175,14 @@ export function shouldUseNativeCodexPassthrough({
   while (normalizedEndpoint.endsWith("/")) normalizedEndpoint = normalizedEndpoint.slice(0, -1);
   const segments = normalizedEndpoint.split("/");
   return segments.includes("responses");
+}
+
+function stripInternalMarkers(body: Record<string, unknown> | null | undefined): void {
+  if (!body || typeof body !== "object") return;
+  delete body._forwardingLane;
+  delete body._toolNameMap;
+  delete body._disableToolPrefix;
+  delete body._nativeCodexPassthrough;
 }
 
 function buildClaudePassthroughToolNameMap(body: Record<string, unknown> | null | undefined) {
@@ -942,6 +951,12 @@ export async function handleChatCore({
     }
   }
 
+  // Strip internal markers from the incoming client body so a malicious or
+  // misbehaving client cannot inject _forwardingLane / _toolNameMap /
+  // _disableToolPrefix to spoof lane-scoped routing behavior. These are
+  // set only by trusted internal paths below (e.g. applyClaudeOAuthLexicalRewrite).
+  stripInternalMarkers(body);
+
   // Translate request (pass reqLogger for intermediate logging)
   let translatedBody = body;
   const isClaudePassthrough = sourceFormat === FORMATS.CLAUDE && targetFormat === FORMATS.CLAUDE;
@@ -1028,6 +1043,7 @@ export async function handleChatCore({
         translatedBody = lexicalRewrite.body;
         if (lexicalRewrite.toolNameMap) {
           translatedBody._toolNameMap = lexicalRewrite.toolNameMap;
+          translatedBody._forwardingLane = "claude-oauth-prefixed";
         }
       }
 
@@ -1073,6 +1089,7 @@ export async function handleChatCore({
         translatedBody = lexicalRewrite.body;
         if (lexicalRewrite.toolNameMap) {
           translatedBody._toolNameMap = lexicalRewrite.toolNameMap;
+          translatedBody._forwardingLane = "claude-oauth-prefixed";
         }
       }
       log?.debug?.("FORMAT", "claude->openai->claude normalized passthrough");
@@ -1236,11 +1253,19 @@ export async function handleChatCore({
   const nativeClaudeToolNameMap = isClaudePassthrough
     ? buildClaudePassthroughToolNameMap(body)
     : null;
-  const toolNameMap =
-    translatedToolNameMap instanceof Map && translatedToolNameMap.size > 0
-      ? translatedToolNameMap
-      : nativeClaudeToolNameMap;
+  const hasTrustedToolNameMap =
+    translatedToolNameMap instanceof Map && translatedToolNameMap.size > 0;
+  const toolNameMap = hasTrustedToolNameMap ? translatedToolNameMap : nativeClaudeToolNameMap;
+  // Lane is only honored when (a) a real Map produced by applyClaudeOAuthLexicalRewrite
+  // is present (Maps survive structuredClone but cannot be JSON-injected by a client),
+  // and (b) the marker string is in the supported lane whitelist. Without (a) a client
+  // could still pass _forwardingLane as a plain string at any other ingress; without
+  // (b) future code could accept unknown lane names silently.
+  const candidateLane = translatedBody._forwardingLane;
+  const forwardingLane =
+    hasTrustedToolNameMap && isValidForwardingLane(candidateLane) ? candidateLane : null;
   delete translatedBody._toolNameMap;
+  delete translatedBody._forwardingLane;
   delete translatedBody._disableToolPrefix;
 
   // Update model in body — use resolved alias so the provider gets the correct model ID (#472)
@@ -2437,8 +2462,27 @@ export async function handleChatCore({
       apiKeyInfo
     );
   } else if (needsTranslation(targetFormat, clientResponseFormat)) {
-    // Standard translation for other providers
     log?.debug?.("STREAM", `Translation mode: ${targetFormat} → ${clientResponseFormat}`);
+    const { resolveToolArgumentMode } = await import("../translator/helpers/toolArgumentMode.ts");
+    const { getCachedSettings } = await import("@/lib/db/readCache");
+    const { sseDiagnosticsSettingsSchema, SSE_DIAGNOSTICS_DEFAULT } =
+      await import("@/shared/validation/settingsSchemas");
+    const settings = await getCachedSettings().catch(() => ({}));
+    const toolArgumentMode = resolveToolArgumentMode(
+      (settings as { toolArgumentMode?: unknown })?.toolArgumentMode as
+        | Parameters<typeof resolveToolArgumentMode>[0]
+        | undefined,
+      provider,
+      forwardingLane as "claude-oauth-prefixed" | null
+    );
+    const rawSseDiagnostics = (settings as { sseDiagnostics?: unknown }).sseDiagnostics;
+    const parsedSseDiagnostics = sseDiagnosticsSettingsSchema.safeParse({
+      ...SSE_DIAGNOSTICS_DEFAULT,
+      ...(rawSseDiagnostics && typeof rawSseDiagnostics === "object" ? rawSseDiagnostics : {}),
+    });
+    const sseDiagnosticsConfig = parsedSseDiagnostics.success
+      ? parsedSseDiagnostics.data
+      : SSE_DIAGNOSTICS_DEFAULT;
     transformStream = createSSETransformStreamWithLogger(
       targetFormat,
       clientResponseFormat,
@@ -2449,7 +2493,10 @@ export async function handleChatCore({
       connectionId,
       body,
       onStreamComplete,
-      apiKeyInfo
+      apiKeyInfo,
+      toolArgumentMode,
+      forwardingLane as "claude-oauth-prefixed" | null,
+      sseDiagnosticsConfig
     );
   } else {
     log?.debug?.("STREAM", `Standard passthrough mode`);

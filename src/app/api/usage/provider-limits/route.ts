@@ -15,6 +15,7 @@ import { scoreAccount, candidateComparator } from "@/sse/services/strategies/ear
 import { isTerminalConnectionStatus } from "@/sse/services/accountTerminalStatus";
 import { isAccountUnavailable } from "@omniroute/open-sse/services/accountFallback";
 import { USAGE_SUPPORTED_PROVIDERS } from "@/shared/constants/providers";
+import { resolveLowQuotaBypass } from "@omniroute/open-sse/services/routing/lowQuotaBypass.ts";
 import type { RoutingPreviewEntry, RoutingPreviewMap } from "@/shared/contracts/routingPreview";
 
 export type { RoutingPreviewEntry, RoutingPreviewMap } from "@/shared/contracts/routingPreview";
@@ -103,7 +104,8 @@ function checkEligibility(c: ConnectionRow, strategy: string): RoutingPreviewEnt
 
 export function computeRouting(
   connections: ConnectionRow[],
-  strategy: RoutingStrategyValue
+  strategy: RoutingStrategyValue,
+  lowQuotaBypassByConn?: Map<string, boolean>
 ): RoutingPreviewMap {
   const map: RoutingPreviewMap = {};
   const groups = new Map<string, ConnectionRow[]>();
@@ -134,11 +136,14 @@ export function computeRouting(
         } else {
           normalizedRateLimitedUntil = null;
         }
-        return scoreAccount({
-          ...c,
-          isActive: c.isActive === false || c.isActive === 0 ? false : undefined,
-          rateLimitedUntil: normalizedRateLimitedUntil,
-        });
+        return scoreAccount(
+          {
+            ...c,
+            isActive: c.isActive === false || c.isActive === 0 ? false : undefined,
+            rateLimitedUntil: normalizedRateLimitedUntil,
+          },
+          lowQuotaBypassByConn?.get(c.id) ?? false
+        );
       });
       const usable = scored.filter((s) => !s.excluded).sort(candidateComparator);
       usable.forEach((s, i) => {
@@ -205,7 +210,15 @@ async function buildResponseBody(extra: Record<string, unknown> = {}) {
     (settings as { fallbackStrategy?: string | null }).fallbackStrategy
   );
   const connections = (await getProviderConnections({})) as unknown as ConnectionRow[];
-  const routing = computeRouting(connections, configuredStrategy);
+  const lowQuotaBypassSettings = (settings as { lowQuotaBypass?: unknown })?.lowQuotaBypass as
+    | Parameters<typeof resolveLowQuotaBypass>[0]
+    | undefined;
+  const lowQuotaBypassByConn = new Map<string, boolean>();
+  for (const c of connections) {
+    if (typeof c?.id !== "string" || typeof c?.provider !== "string") continue;
+    lowQuotaBypassByConn.set(c.id, resolveLowQuotaBypass(lowQuotaBypassSettings, c.provider));
+  }
+  const routing = computeRouting(connections, configuredStrategy, lowQuotaBypassByConn);
 
   return mergeIntoResponseBody(extra, {
     caches: getCachedProviderLimitsMap(),

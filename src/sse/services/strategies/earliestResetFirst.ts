@@ -165,11 +165,26 @@ export const URGENCY_FLOOR = 1;
  *   W/CAP < t ≤ W       → multiplier = W/t ∈ (1, CAP].
  *   t > W               → multiplier floored at URGENCY_FLOOR=1, so
  *                         pressure = Q (lower bound).
- *   Q < MIN_USABLE_REMAINING_PCT → returns -Infinity (defensive; in practice
- *                         scoreSession/WeeklyTrack already returns kind:"excluded").
+ *   Q < MIN_USABLE_REMAINING_PCT
+ *                       → -Infinity when opts.bypassMinUsable is false/omitted
+ *                         (default; scoreSession/WeeklyTrack already returns
+ *                         kind:"excluded" before reaching this branch).
+ *                       → finite Q × multiplier when opts.bypassMinUsable is
+ *                         true (LowQuota bypass path: 0 < Q < 5 is still
+ *                         scored as routable, just deprioritized). Q ≤ 0 is
+ *                         still hard-excluded one layer above (scoreAccount).
  */
-export function pressure(Q: number, t: number | null, W: number): number {
-  if (Q < MIN_USABLE_REMAINING_PCT) return -Infinity;
+export interface PressureOptions {
+  bypassMinUsable?: boolean;
+}
+
+export function pressure(
+  Q: number,
+  t: number | null,
+  W: number,
+  opts: PressureOptions = {}
+): number {
+  if (!opts.bypassMinUsable && Q < MIN_USABLE_REMAINING_PCT) return -Infinity;
   if (t === null || !Number.isFinite(t)) return Q * URGENCY_CAP;
   if (t <= 0) return Q * URGENCY_CAP;
   const multiplier = Math.max(URGENCY_FLOOR, Math.min(W / t, URGENCY_CAP));
@@ -223,21 +238,26 @@ function clamp(value: number, min: number, max: number): number {
   return value;
 }
 
-export function scoreSessionTrack(connId: string): TrackResult {
+export function scoreSessionTrack(connId: string, lowQuotaBypass = false): TrackResult {
   const status = getQuotaWindowStatus(connId, "session", 90);
   if (!status) return { kind: "missing" };
 
   const Q = status.remainingPercentage;
-  if (Q < MIN_USABLE_REMAINING_PCT) {
+
+  if (Q <= 0) {
+    return { kind: "excluded", reason: "session<=0%", resetAt: status.resetAt };
+  }
+  if (!lowQuotaBypass && Q < MIN_USABLE_REMAINING_PCT) {
     return { kind: "excluded", reason: "session<5%", resetAt: status.resetAt };
   }
 
   const sec = deltaSec(status.resetAt);
+  const pOpts: PressureOptions = { bypassMinUsable: lowQuotaBypass };
 
   if (sec === null && Q === 100) {
     return {
       kind: "known",
-      score: pressure(Q, null, W_SESSION_SEC),
+      score: pressure(Q, null, W_SESSION_SEC, pOpts),
       remainingPct: Q,
       resetAt: null,
       secondsToReset: Number.POSITIVE_INFINITY,
@@ -248,7 +268,7 @@ export function scoreSessionTrack(connId: string): TrackResult {
 
   return {
     kind: "known",
-    score: pressure(Q, sec, W_SESSION_SEC),
+    score: pressure(Q, sec, W_SESSION_SEC, pOpts),
     remainingPct: Q,
     resetAt: status.resetAt,
     secondsToReset: sec,
@@ -260,21 +280,26 @@ export function scoreSessionTrack(connId: string): TrackResult {
 // per user instruction. Routing reads only the overall `weekly` window —
 // model-aware quota separation is not modelled. If Anthropic 429s an opus
 // request because per-model quota is exhausted, accountFallback handles retry.
-export function scoreWeeklyTrack(connId: string): TrackResult {
+export function scoreWeeklyTrack(connId: string, lowQuotaBypass = false): TrackResult {
   const overall = getQuotaWindowStatus(connId, "weekly", 90);
   if (!overall) return { kind: "missing" };
 
-  if (overall.remainingPercentage < MIN_USABLE_REMAINING_PCT) {
+  const Q = overall.remainingPercentage;
+
+  if (Q <= 0) {
+    return { kind: "excluded", reason: "weekly<=0%", resetAt: overall.resetAt };
+  }
+  if (!lowQuotaBypass && Q < MIN_USABLE_REMAINING_PCT) {
     return { kind: "excluded", reason: "weekly<5%", resetAt: overall.resetAt };
   }
 
   const sec = deltaSec(overall.resetAt);
-  const Q = overall.remainingPercentage;
+  const pOpts: PressureOptions = { bypassMinUsable: lowQuotaBypass };
 
   if (sec === null && Q === 100) {
     return {
       kind: "known",
-      score: pressure(Q, null, W_WEEKLY_SEC),
+      score: pressure(Q, null, W_WEEKLY_SEC, pOpts),
       remainingPct: Q,
       resetAt: null,
       secondsToReset: Number.POSITIVE_INFINITY,
@@ -285,7 +310,7 @@ export function scoreWeeklyTrack(connId: string): TrackResult {
 
   return {
     kind: "known",
-    score: pressure(Q, sec, W_WEEKLY_SEC),
+    score: pressure(Q, sec, W_WEEKLY_SEC, pOpts),
     remainingPct: Q,
     resetAt: overall.resetAt,
     secondsToReset: sec,
@@ -323,9 +348,9 @@ function earliestKnownReset(tracks: TrackResult[]): string | null {
   return new Date(Math.min(...dates)).toISOString();
 }
 
-export function scoreAccount(conn: ConnectionLike): ScoredCandidate {
-  const s = scoreSessionTrack(conn.id);
-  const w = scoreWeeklyTrack(conn.id);
+export function scoreAccount(conn: ConnectionLike, lowQuotaBypass = false): ScoredCandidate {
+  const s = scoreSessionTrack(conn.id, lowQuotaBypass);
+  const w = scoreWeeklyTrack(conn.id, lowQuotaBypass);
 
   // Terminal connection statuses (banned / expired / credits_exhausted) must
   // be excluded regardless of cached quota state. Without this guard a stale
@@ -501,7 +526,8 @@ export function isAffinityValid(
   conn: ConnectionLike,
   sessionId: string | null,
   scoredAlternatives?: ScoredCandidate[],
-  provider?: string | null
+  provider?: string | null,
+  lowQuotaBypass = false
 ): AffinityValidity {
   if (conn.isActive === false) return { valid: false, reason: "inactive" };
 
@@ -530,9 +556,9 @@ export function isAffinityValid(
     return { valid: false, reason: "affinity_window_passed" };
   }
 
-  const s = scoreSessionTrack(conn.id);
+  const s = scoreSessionTrack(conn.id, lowQuotaBypass);
   if (s.kind === "excluded") return { valid: false, reason: s.reason };
-  const w = scoreWeeklyTrack(conn.id);
+  const w = scoreWeeklyTrack(conn.id, lowQuotaBypass);
   if (w.kind === "excluded") return { valid: false, reason: w.reason };
 
   // Smart continuation viability: only checked when caller passes pre-scored
@@ -649,15 +675,18 @@ function buildAllExcluded(scored: ScoredCandidate[]): AllExcludedResult {
 export function selectByEarliestResetFirst(
   candidates: ConnectionLike[],
   sessionId: string | null,
-  provider?: string | null
+  provider?: string | null,
+  lowQuotaBypass = false
 ): { selected: ConnectionLike } | AllExcludedResult {
-  const scored: ScoredCandidate[] = candidates.map((c) => scoreAccount(c));
+  const scored: ScoredCandidate[] = candidates.map((c) => scoreAccount(c, lowQuotaBypass));
 
   if (sessionId) {
     const boundId = getSessionConnection(sessionId);
     if (boundId) {
       const bound = candidates.find((c) => c.id === boundId);
-      const affinity = bound ? isAffinityValid(bound, sessionId, scored, provider) : null;
+      const affinity = bound
+        ? isAffinityValid(bound, sessionId, scored, provider, lowQuotaBypass)
+        : null;
       if (bound && affinity?.valid === true) {
         log.debug("AUTH/affinity", "kept", {
           sessionId,

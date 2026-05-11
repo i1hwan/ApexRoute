@@ -1,5 +1,14 @@
 // Provider definitions
 
+export type ProviderDefinition = {
+  id: string;
+  alias?: string | undefined;
+  name: string;
+  icon: string;
+  color: string;
+  [key: string]: unknown;
+};
+
 // Free Providers
 export const FREE_PROVIDERS = {
   qoder: { id: "qoder", alias: "if", name: "Qoder AI", icon: "water_drop", color: "#6366F1" },
@@ -19,7 +28,7 @@ export const FREE_PROVIDERS = {
 
 export const FREE_APIKEY_PROVIDER_IDS = new Set(["qoder"]);
 
-export function supportsApiKeyOnFreeProvider(providerId) {
+export function supportsApiKeyOnFreeProvider(providerId: string): boolean {
   return FREE_APIKEY_PROVIDER_IDS.has(providerId);
 }
 
@@ -649,11 +658,11 @@ export const OPENAI_COMPATIBLE_PREFIX = "openai-compatible-";
 export const ANTHROPIC_COMPATIBLE_PREFIX = "anthropic-compatible-";
 export const CLAUDE_CODE_COMPATIBLE_PREFIX = "anthropic-compatible-cc-";
 
-export function isOpenAICompatibleProvider(providerId) {
+export function isOpenAICompatibleProvider(providerId: unknown): providerId is string {
   return typeof providerId === "string" && providerId.startsWith(OPENAI_COMPATIBLE_PREFIX);
 }
 
-export function isAnthropicCompatibleProvider(providerId) {
+export function isAnthropicCompatibleProvider(providerId: unknown): providerId is string {
   return typeof providerId === "string" && providerId.startsWith(ANTHROPIC_COMPATIBLE_PREFIX);
 }
 
@@ -675,7 +684,7 @@ export const UPSTREAM_PROXY_PROVIDERS = {
   },
 };
 
-export function isClaudeCodeCompatibleProvider(providerId) {
+export function isClaudeCodeCompatibleProvider(providerId: unknown): providerId is string {
   return typeof providerId === "string" && providerId.startsWith(CLAUDE_CODE_COMPATIBLE_PREFIX);
 }
 
@@ -694,8 +703,8 @@ export const AUTH_METHODS = {
 };
 
 // Helper: Get provider by alias
-export function getProviderByAlias(alias) {
-  for (const provider of Object.values(AI_PROVIDERS)) {
+export function getProviderByAlias(alias: string): ProviderDefinition | null {
+  for (const provider of Object.values(AI_PROVIDERS) as ProviderDefinition[]) {
     if (provider.alias === alias || provider.id === alias) {
       return provider;
     }
@@ -704,25 +713,29 @@ export function getProviderByAlias(alias) {
 }
 
 // Helper: Get provider ID from alias
-export function resolveProviderId(aliasOrId) {
+export function resolveProviderId(aliasOrId: string): string {
   const provider = getProviderByAlias(aliasOrId);
   return provider?.id || aliasOrId;
 }
 
 // Helper: Get alias from provider ID
-export function getProviderAlias(providerId) {
-  const provider = AI_PROVIDERS[providerId];
+export function getProviderAlias(providerId: string): string {
+  const provider = (AI_PROVIDERS as Record<string, ProviderDefinition | undefined>)[providerId];
   return provider?.alias || providerId;
 }
 
 // Alias to ID mapping (for quick lookup)
-export const ALIAS_TO_ID = Object.values(AI_PROVIDERS).reduce((acc, p) => {
+export const ALIAS_TO_ID = (Object.values(AI_PROVIDERS) as ProviderDefinition[]).reduce<
+  Record<string, string>
+>((acc, p) => {
   if (p.alias) acc[p.alias] = p.id;
   return acc;
 }, {});
 
 // ID to Alias mapping
-export const ID_TO_ALIAS = Object.values(AI_PROVIDERS).reduce((acc, p) => {
+export const ID_TO_ALIAS = (Object.values(AI_PROVIDERS) as ProviderDefinition[]).reduce<
+  Record<string, string>
+>((acc, p) => {
   acc[p.id] = p.alias || p.id;
   return acc;
 }, {});

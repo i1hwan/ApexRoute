@@ -4,6 +4,7 @@ import { useTranslations } from "next-intl";
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import {
   parseQuotaData,
   calculatePercentage,
@@ -548,6 +549,15 @@ export default function ProviderLimits() {
             </span>
             {t("refreshAll")}
           </button>
+
+          <Link
+            href="/dashboard/settings?tab=compatibility"
+            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-bg-subtle border border-border text-text-main text-[13px] cursor-pointer no-underline"
+            title={t("compatibilitySettingsLinkTooltip")}
+          >
+            <span className="material-symbols-outlined text-[16px]">tune</span>
+            {t("compatibilitySettingsLink")}
+          </Link>
 
           <AutoRefreshControl onTrigger={refreshAll} />
         </div>

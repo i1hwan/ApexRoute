@@ -35,6 +35,15 @@ function formatNum(value: number | null | undefined, digits = 0): string {
   return value.toFixed(digits);
 }
 
+// Format a quota percentage for display. Positive sub-1% values must not be
+// rounded down to 0% — that visually collides with the hard-excluded ≤0% case
+// and erodes operator trust in the LowQuota bypass indicator.
+export function formatPct(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return "—";
+  if (value > 0 && value < 1) return "<1";
+  return Math.round(value).toString();
+}
+
 export function getExcludedI18nKey(reason: string | null): string {
   switch (reason) {
     case "inactive":
@@ -44,6 +53,8 @@ export function getExcludedI18nKey(reason: string | null): string {
     case "terminal":
       return "routingPriorityExcludedTerminal";
     case "quota_exhausted_unknown_reset":
+    case "session<=0%":
+    case "weekly<=0%":
       return "routingPriorityExcludedExhausted";
     default:
       if (reason && reason.includes("<5%")) return "routingPriorityExcludedLowQuota";
@@ -158,13 +169,25 @@ export default function RoutingBadge({ entry }: RoutingBadgeProps) {
   const isNext = entry.isNext;
   const rank = entry.rank ?? 0;
 
-  const label = isExcluded
+  const sessionPct = entry.breakdown?.sessionRemainingPct ?? null;
+  const weeklyPct = entry.breakdown?.weeklyRemainingPct ?? null;
+  const minKnownPct = (() => {
+    const known: number[] = [];
+    if (Number.isFinite(sessionPct)) known.push(sessionPct as number);
+    if (Number.isFinite(weeklyPct)) known.push(weeklyPct as number);
+    return known.length > 0 ? Math.min(...known) : null;
+  })();
+  const nearDepletion = !isExcluded && minKnownPct !== null && minKnownPct > 0 && minKnownPct < 5;
+
+  const baseLabel = isExcluded
     ? t(getExcludedI18nKey(entry.excludedReason))
     : isNext
       ? t("routingPriorityNext")
       : t("routingPriorityRank", { rank });
 
-  const variant = isExcluded ? "error" : isNext ? "primary" : "default";
+  const label = nearDepletion ? t("routingPriorityRankLowQuota", { n: rank }) : baseLabel;
+
+  const variant = isExcluded ? "error" : nearDepletion ? "warning" : isNext ? "primary" : "default";
 
   const wrapperClass = isExcluded
     ? "[background-image:repeating-linear-gradient(135deg,transparent_0_4px,rgba(239,68,68,0.18)_4px_8px)]"
@@ -196,7 +219,7 @@ export default function RoutingBadge({ entry }: RoutingBadgeProps) {
               label={t("routingScoreSession")}
               value={
                 Number.isFinite(entry.breakdown?.sessionRemainingPct)
-                  ? `${formatNum(entry.breakdown?.sessionRemainingPct, 0)}%`
+                  ? `${formatPct(entry.breakdown?.sessionRemainingPct)}%`
                   : "—"
               }
             />
@@ -204,7 +227,7 @@ export default function RoutingBadge({ entry }: RoutingBadgeProps) {
               label={t("routingScoreWeekly")}
               value={
                 Number.isFinite(entry.breakdown?.weeklyRemainingPct)
-                  ? `${formatNum(entry.breakdown?.weeklyRemainingPct, 0)}%`
+                  ? `${formatPct(entry.breakdown?.weeklyRemainingPct)}%`
                   : "—"
               }
             />
@@ -236,6 +259,14 @@ export default function RoutingBadge({ entry }: RoutingBadgeProps) {
               label={t("routingScoreFinal")}
               value={formatNum(entry.breakdown?.finalScore ?? entry.score, 1)}
             />
+            {nearDepletion ? (
+              <div className="mt-1 pt-1 border-t border-white/10 text-amber-300 leading-snug">
+                {t("routingPriorityNearDepletionTooltip", {
+                  s: formatPct(sessionPct),
+                  w: formatPct(weeklyPct),
+                })}
+              </div>
+            ) : null}
           </div>
         )}
       </span>

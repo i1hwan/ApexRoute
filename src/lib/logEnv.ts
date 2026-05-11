@@ -13,12 +13,16 @@ const DEFAULT_PROXY_LOGS_TABLE_MAX_ROWS = 100000;
 // which the Dockerfile never created, causing the pino transport worker to
 // die on first write and flood every chat request with `Error: the worker
 // has exited` uncaughtExceptions (PR #29).
-function resolveDefaultDataDir(): string {
+export function resolveDefaultDataDir(): string {
   const fromEnv = process.env.DATA_DIR;
   if (fromEnv && fromEnv.trim().length > 0) return fromEnv;
   return path.join(process.cwd(), "data");
 }
 const DEFAULT_APP_LOG_PATH = path.join(resolveDefaultDataDir(), "logs", "application", "app.log");
+
+export function getSseDiagnosticsDir(): string {
+  return path.join(resolveDefaultDataDir(), "logs", "sse-diagnostics");
+}
 
 function parsePositiveInt(value: string | undefined, fallback: number): number {
   if (!value) return fallback;
