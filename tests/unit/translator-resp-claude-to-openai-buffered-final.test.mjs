@@ -48,6 +48,23 @@ function flatten(...lists) {
   return lists.filter(Boolean).flat();
 }
 
+// stream-normalized's first emitted tool_calls chunk holds a live reference to
+// state.toolCalls[i].function (arguments mutate as deltas arrive). To simulate
+// the OpenAI SSE wire — where each chunk is serialized at emit time and the
+// client never sees subsequent mutations — we snapshot chunks at capture time.
+function snapshotChunks(...lists) {
+  return JSON.parse(JSON.stringify(flatten(...lists)));
+}
+
+// Wraps a feed* call so the emitted chunks are JSON-snapshotted at emit time.
+// Without this, stream-normalized mode's first emit holds a live reference to
+// state.toolCalls[i].function.arguments which subsequent deltas mutate — the
+// captured array is unusable for client-style accumulator simulation.
+function feedAndSnapshot(fn) {
+  const result = fn();
+  return result ? JSON.parse(JSON.stringify(result)) : result;
+}
+
 function accumulateOpenAIToolCalls(chunks) {
   const calls = new Map();
   let finishReason = null;
@@ -279,13 +296,15 @@ test("§7.2.7 same invariant under stream-normalized mode (regression guard)", (
 test("§7.2.8 client-style accumulator parity — buffered-final vs stream-normalized", () => {
   function run(mode) {
     const state = createState(mode);
-    feed(state, { type: "message_start", message: { id: "msg1", model: "claude-opus-4-7" } });
-    const start = feedToolUseStart(state, 0, "toolu_a", "f");
-    const d1 = feedDelta(state, 0, '{"header":"\\u');
-    const d2 = feedDelta(state, 0, 'ad6c\\ud604"}');
-    const stop = feedStop(state, 0);
-    const md = feedMessageDelta(state, "tool_use");
-    const ms = feedMessageStop(state);
+    feedAndSnapshot(() =>
+      feed(state, { type: "message_start", message: { id: "msg1", model: "claude-opus-4-7" } })
+    );
+    const start = feedAndSnapshot(() => feedToolUseStart(state, 0, "toolu_a", "f"));
+    const d1 = feedAndSnapshot(() => feedDelta(state, 0, '{"header":"\\u'));
+    const d2 = feedAndSnapshot(() => feedDelta(state, 0, 'ad6c\\ud604"}'));
+    const stop = feedAndSnapshot(() => feedStop(state, 0));
+    const md = feedAndSnapshot(() => feedMessageDelta(state, "tool_use"));
+    const ms = feedAndSnapshot(() => feedMessageStop(state));
     return flatten(start, d1, d2, stop, md, ms);
   }
 

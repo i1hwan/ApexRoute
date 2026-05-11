@@ -34,6 +34,7 @@ interface CaptureBundle {
   translated_openai_chunks: unknown[];
   _capture_overflow?: boolean;
   _bytes: number;
+  _finalized?: boolean;
 }
 
 let activeBundleCount = 0;
@@ -102,6 +103,8 @@ export async function finalizeBundle(
   terminationDetail?: string
 ): Promise<void> {
   if (!bundle) return;
+  if (bundle._finalized) return;
+  bundle._finalized = true;
   bundle.metadata.endedAt = Date.now();
   bundle.metadata.termination = termination;
   if (terminationDetail) bundle.metadata.terminationDetail = terminationDetail;
@@ -131,14 +134,7 @@ function overflowGuard(bundle: CaptureBundle, addedBytes: number): boolean {
 }
 
 function approxByteLen(value: string): number {
-  let bytes = 0;
-  for (let i = 0; i < value.length; i++) {
-    const code = value.charCodeAt(i);
-    if (code < 0x80) bytes += 1;
-    else if (code < 0x800) bytes += 2;
-    else bytes += 3;
-  }
-  return bytes;
+  return Buffer.byteLength(value, "utf8");
 }
 
 function safeJson(value: unknown): string {

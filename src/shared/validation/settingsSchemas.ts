@@ -9,14 +9,22 @@ import { z } from "zod";
 import { HIDEABLE_SIDEBAR_ITEM_IDS } from "@/shared/constants/sidebarVisibility";
 import { USAGE_SUPPORTED_PROVIDERS } from "@/shared/constants/providers";
 
-const SUPPORTED_PROVIDER_VALUES = USAGE_SUPPORTED_PROVIDERS as readonly [string, ...string[]];
-const SUPPORTED_LANE_VALUES = ["claude-oauth-prefixed"] as const;
+const SUPPORTED_PROVIDER_SET = new Set<string>(USAGE_SUPPORTED_PROVIDERS as readonly string[]);
+const SUPPORTED_LANE_SET = new Set<string>(["claude-oauth-prefixed"]);
 
 const providerOverrideRecord = <V extends z.ZodTypeAny>(valueSchema: V) =>
-  z.record(z.enum(SUPPORTED_PROVIDER_VALUES), valueSchema);
+  z
+    .record(z.string(), valueSchema)
+    .refine((obj) => Object.keys(obj).every((k) => SUPPORTED_PROVIDER_SET.has(k)), {
+      message: `Unknown provider id. Must be one of: ${USAGE_SUPPORTED_PROVIDERS.join(", ")}`,
+    });
 
 const laneOverrideRecord = <V extends z.ZodTypeAny>(valueSchema: V) =>
-  z.record(z.enum(SUPPORTED_LANE_VALUES), valueSchema);
+  z
+    .record(z.string(), valueSchema)
+    .refine((obj) => Object.keys(obj).every((k) => SUPPORTED_LANE_SET.has(k)), {
+      message: "Unknown lane id",
+    });
 
 const toolArgumentModeValueSchema = z.enum(["stream-normalized", "buffered-final"]);
 

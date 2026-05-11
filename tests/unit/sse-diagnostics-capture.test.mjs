@@ -186,6 +186,29 @@ test("appendRawLine no-op when bundle is null", async () => {
   assert.equal(existsSync(diagDir()), false);
 });
 
+test("finalizeBundle is idempotent — second call is a no-op (defense against double-finalize)", async () => {
+  const mod = await loadModule();
+  const bundle = mod.tryCreateBundle(
+    { ...DEFAULT_CONFIG, captureProviderRawSSELines: true },
+    { provider: "claude" }
+  );
+  mod.appendRawLine(bundle, 0, "data: x");
+  await mod.finalizeBundle(bundle, "flush");
+  const filesAfterFirst = readdirSync(diagDir()).filter((f) => f.endsWith(".json"));
+  assert.equal(filesAfterFirst.length, 1);
+  assert.equal(mod._testOnlyGetActiveCount(), 0);
+
+  // Second finalize with different termination — must be skipped entirely.
+  await mod.finalizeBundle(bundle, "upstream_error", "should be ignored");
+  const filesAfterSecond = readdirSync(diagDir()).filter((f) => f.endsWith(".json"));
+  assert.equal(filesAfterSecond.length, 1);
+  assert.equal(mod._testOnlyGetActiveCount(), 0);
+
+  // Original termination preserved
+  const payload = JSON.parse(readFileSync(join(diagDir(), filesAfterFirst[0]), "utf8"));
+  assert.equal(payload.metadata.termination, "flush");
+});
+
 test("clear route deletes all bundle files", async () => {
   const mod = await loadModule();
   for (let i = 0; i < 3; i++) {
