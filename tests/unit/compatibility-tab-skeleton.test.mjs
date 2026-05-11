@@ -106,3 +106,28 @@ test("ko.json compatibility keys are not just english fallback (sanity)", () => 
   assert.notEqual(ko.settings.compatibility, en.settings.compatibility);
   assert.notEqual(ko.settings.compatibilityToolArgsTitle, en.settings.compatibilityToolArgsTitle);
 });
+
+const USAGE_NS_KEYS = [
+  "compatibilitySettingsLink",
+  "compatibilitySettingsLinkTooltip",
+  "routingPriorityRankLowQuota",
+  "routingPriorityNearDepletionTooltip",
+];
+
+test("en.json usage namespace has new compatibility deep-link + composite badge keys", () => {
+  for (const key of USAGE_NS_KEYS) {
+    assert.ok(
+      typeof en.usage?.[key] === "string" && en.usage[key].length > 0,
+      `missing/empty en.usage.${key}`
+    );
+  }
+});
+
+test("ko.json usage namespace has new compatibility deep-link + composite badge keys", () => {
+  for (const key of USAGE_NS_KEYS) {
+    assert.ok(
+      typeof ko.usage?.[key] === "string" && ko.usage[key].length > 0,
+      `missing/empty ko.usage.${key}`
+    );
+  }
+});

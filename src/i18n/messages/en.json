@@ -2691,7 +2691,11 @@
     "tierPro": "Pro",
     "tierPlus": "Plus",
     "tierFree": "Free",
-    "tierUnknown": "Unknown"
+    "tierUnknown": "Unknown",
+    "compatibilitySettingsLink": "Compatibility",
+    "compatibilitySettingsLinkTooltip": "Open Claude Compatibility settings (tool argument mode, LowQuota bypass, SSE diagnostics)",
+    "routingPriorityRankLowQuota": "Rank {n} · LowQuota",
+    "routingPriorityNearDepletionTooltip": "⚠ Near depletion: session={s}%, weekly={w}% (bypass active)"
   },
   "modals": {
     "waitingAuth": "Waiting for Authorization",
