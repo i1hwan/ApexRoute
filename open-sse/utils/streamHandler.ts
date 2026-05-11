@@ -1,6 +1,6 @@
 // Stream handler with disconnect detection - shared for all providers
 
-import { lookupBundle, finalizeBundle } from "./sseDiagnosticsBundle.ts";
+import { lookupBundle, registerBundle, finalizeBundle } from "./sseDiagnosticsBundle.ts";
 
 type StreamDisconnectEvent = {
   reason: string;
@@ -202,8 +202,17 @@ export function pipeWithDisconnect(
   streamController: StreamController
 ) {
   const transformedBody = providerResponse.body.pipeThrough(transformStream);
-  return createDisconnectAwareStream(
-    { readable: transformedBody, writable: { getWriter: () => ({ abort: () => {} }) } },
-    streamController
-  );
+  const wrapper = {
+    readable: transformedBody,
+    writable: { getWriter: () => ({ abort: () => {} }) },
+  };
+  // Re-register bundle against the wrapper: createSSEStream registers under
+  // the original transformStream, but createDisconnectAwareStream looks up
+  // by the wrapper we hand it. Without this bridge, client_abort finalize
+  // silently no-ops in production.
+  const bundle = lookupBundle(transformStream);
+  if (bundle) {
+    registerBundle(wrapper, bundle);
+  }
+  return createDisconnectAwareStream(wrapper, streamController);
 }

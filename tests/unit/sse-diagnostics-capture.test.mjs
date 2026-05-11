@@ -28,6 +28,18 @@ function diagDir() {
   return join(tmpDir, "logs", "sse-diagnostics");
 }
 
+async function waitForBundleFile(timeoutMs = 1000, intervalMs = 25) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (existsSync(diagDir())) {
+      const files = readdirSync(diagDir()).filter((f) => f.endsWith(".json"));
+      if (files.length > 0) return files;
+    }
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  return [];
+}
+
 const DEFAULT_CONFIG = {
   captureProviderRawSSELines: false,
   captureProviderParsedEvents: false,
@@ -216,11 +228,48 @@ test("client_abort path via createDisconnectAwareStream finalizes the bundle (re
   const reader = readable.getReader();
   await reader.cancel("client closed connection");
 
-  // Give the async finalize one tick to land on disk
-  await new Promise((r) => setTimeout(r, 50));
-
-  const files = readdirSync(diagDir()).filter((f) => f.endsWith(".json"));
+  const files = await waitForBundleFile();
   assert.equal(files.length, 1);
+  const payload = JSON.parse(readFileSync(join(diagDir(), files[0]), "utf8"));
+  assert.equal(payload.metadata.termination, "client_abort");
+  assert.equal(payload.metadata.terminationDetail, "client closed connection");
+  assert.equal(payload.provider_raw_lines.length, 1);
+});
+
+test("client_abort path via pipeWithDisconnect() finalizes the bundle (wrapper key mismatch regression)", async () => {
+  const diagMod = await loadModule();
+  const { createStreamController, pipeWithDisconnect } =
+    await import("../../open-sse/utils/streamHandler.ts");
+
+  const bundle = diagMod.tryCreateBundle(
+    { ...DEFAULT_CONFIG, captureProviderRawSSELines: true },
+    { provider: "claude" }
+  );
+  diagMod.appendRawLine(bundle, 0, "data: hello");
+
+  const originalTransform = new TransformStream({
+    transform(chunk, controller) {
+      controller.enqueue(chunk);
+    },
+  });
+  diagMod.registerBundle(originalTransform, bundle);
+
+  const providerResponse = new Response(
+    new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("data: chunk1\n\n"));
+      },
+    })
+  );
+
+  const controller = createStreamController({ provider: "claude", model: "claude-opus-4-7" });
+  const readable = pipeWithDisconnect(providerResponse, originalTransform, controller);
+  const reader = readable.getReader();
+  await reader.read();
+  await reader.cancel("client closed connection");
+
+  const files = await waitForBundleFile();
+  assert.equal(files.length, 1, "client_abort must finalize through pipeWithDisconnect wrapper");
   const payload = JSON.parse(readFileSync(join(diagDir(), files[0]), "utf8"));
   assert.equal(payload.metadata.termination, "client_abort");
   assert.equal(payload.metadata.terminationDetail, "client closed connection");
