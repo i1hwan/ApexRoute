@@ -9,9 +9,14 @@ export interface ToolArgumentModeSettings {
 }
 
 const VALID_MODES = new Set<ToolArgumentMode>(["stream-normalized", "buffered-final"]);
+const VALID_LANES = new Set<ForwardingLane>(["claude-oauth-prefixed"]);
 
 function isValidMode(value: unknown): value is ToolArgumentMode {
   return typeof value === "string" && VALID_MODES.has(value as ToolArgumentMode);
+}
+
+export function isValidForwardingLane(value: unknown): value is ForwardingLane {
+  return typeof value === "string" && VALID_LANES.has(value as ForwardingLane);
 }
 
 export function resolveToolArgumentMode(

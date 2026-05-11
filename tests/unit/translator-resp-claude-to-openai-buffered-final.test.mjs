@@ -377,3 +377,16 @@ test("resolveToolArgumentMode resolver precedence", async () => {
     "stream-normalized"
   );
 });
+
+test("isValidForwardingLane whitelists only known lane markers (Copilot trust boundary)", async () => {
+  const { isValidForwardingLane } =
+    await import("../../open-sse/translator/helpers/toolArgumentMode.ts");
+  assert.equal(isValidForwardingLane("claude-oauth-prefixed"), true);
+  assert.equal(isValidForwardingLane("claude-oauth"), false);
+  assert.equal(isValidForwardingLane("CLAUDE-OAUTH-PREFIXED"), false);
+  assert.equal(isValidForwardingLane(""), false);
+  assert.equal(isValidForwardingLane(null), false);
+  assert.equal(isValidForwardingLane(undefined), false);
+  assert.equal(isValidForwardingLane(42), false);
+  assert.equal(isValidForwardingLane({ toString: () => "claude-oauth-prefixed" }), false);
+});

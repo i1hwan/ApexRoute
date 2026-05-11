@@ -165,8 +165,14 @@ export const URGENCY_FLOOR = 1;
  *   W/CAP < t ≤ W       → multiplier = W/t ∈ (1, CAP].
  *   t > W               → multiplier floored at URGENCY_FLOOR=1, so
  *                         pressure = Q (lower bound).
- *   Q < MIN_USABLE_REMAINING_PCT → returns -Infinity (defensive; in practice
- *                         scoreSession/WeeklyTrack already returns kind:"excluded").
+ *   Q < MIN_USABLE_REMAINING_PCT
+ *                       → -Infinity when opts.bypassMinUsable is false/omitted
+ *                         (default; scoreSession/WeeklyTrack already returns
+ *                         kind:"excluded" before reaching this branch).
+ *                       → finite Q × multiplier when opts.bypassMinUsable is
+ *                         true (LowQuota bypass path: 0 < Q < 5 is still
+ *                         scored as routable, just deprioritized). Q ≤ 0 is
+ *                         still hard-excluded one layer above (scoreAccount).
  */
 export interface PressureOptions {
   bypassMinUsable?: boolean;

@@ -71,6 +71,7 @@ import { invalidateCodexQuotaCache } from "../services/codexQuotaFetcher.ts";
 import { translateNonStreamingResponse } from "./responseTranslator.ts";
 import { extractUsageFromResponse } from "./usageExtractor.ts";
 import { applyClaudeOAuthLexicalRewrite } from "../translator/helpers/claudeHelper.ts";
+import { isValidForwardingLane } from "../translator/helpers/toolArgumentMode.ts";
 import {
   parseSSEToClaudeResponse,
   parseSSEToOpenAIResponse,
@@ -174,6 +175,14 @@ export function shouldUseNativeCodexPassthrough({
   while (normalizedEndpoint.endsWith("/")) normalizedEndpoint = normalizedEndpoint.slice(0, -1);
   const segments = normalizedEndpoint.split("/");
   return segments.includes("responses");
+}
+
+function stripInternalMarkers(body: Record<string, unknown> | null | undefined): void {
+  if (!body || typeof body !== "object") return;
+  delete body._forwardingLane;
+  delete body._toolNameMap;
+  delete body._disableToolPrefix;
+  delete body._nativeCodexPassthrough;
 }
 
 function buildClaudePassthroughToolNameMap(body: Record<string, unknown> | null | undefined) {
@@ -942,6 +951,12 @@ export async function handleChatCore({
     }
   }
 
+  // Strip internal markers from the incoming client body so a malicious or
+  // misbehaving client cannot inject _forwardingLane / _toolNameMap /
+  // _disableToolPrefix to spoof lane-scoped routing behavior. These are
+  // set only by trusted internal paths below (e.g. applyClaudeOAuthLexicalRewrite).
+  stripInternalMarkers(body);
+
   // Translate request (pass reqLogger for intermediate logging)
   let translatedBody = body;
   const isClaudePassthrough = sourceFormat === FORMATS.CLAUDE && targetFormat === FORMATS.CLAUDE;
@@ -1238,12 +1253,17 @@ export async function handleChatCore({
   const nativeClaudeToolNameMap = isClaudePassthrough
     ? buildClaudePassthroughToolNameMap(body)
     : null;
-  const toolNameMap =
-    translatedToolNameMap instanceof Map && translatedToolNameMap.size > 0
-      ? translatedToolNameMap
-      : nativeClaudeToolNameMap;
+  const hasTrustedToolNameMap =
+    translatedToolNameMap instanceof Map && translatedToolNameMap.size > 0;
+  const toolNameMap = hasTrustedToolNameMap ? translatedToolNameMap : nativeClaudeToolNameMap;
+  // Lane is only honored when (a) a real Map produced by applyClaudeOAuthLexicalRewrite
+  // is present (Maps survive structuredClone but cannot be JSON-injected by a client),
+  // and (b) the marker string is in the supported lane whitelist. Without (a) a client
+  // could still pass _forwardingLane as a plain string at any other ingress; without
+  // (b) future code could accept unknown lane names silently.
+  const candidateLane = translatedBody._forwardingLane;
   const forwardingLane =
-    typeof translatedBody._forwardingLane === "string" ? translatedBody._forwardingLane : null;
+    hasTrustedToolNameMap && isValidForwardingLane(candidateLane) ? candidateLane : null;
   delete translatedBody._toolNameMap;
   delete translatedBody._forwardingLane;
   delete translatedBody._disableToolPrefix;
