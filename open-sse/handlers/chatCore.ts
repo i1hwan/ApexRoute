@@ -2444,8 +2444,10 @@ export async function handleChatCore({
   } else if (needsTranslation(targetFormat, clientResponseFormat)) {
     log?.debug?.("STREAM", `Translation mode: ${targetFormat} → ${clientResponseFormat}`);
     const { resolveToolArgumentMode } = await import("../translator/helpers/toolArgumentMode.ts");
-    const { getSettings } = await import("@/lib/localDb");
-    const settings = await getSettings().catch(() => ({}));
+    const { getCachedSettings } = await import("@/lib/db/readCache");
+    const { sseDiagnosticsSettingsSchema, SSE_DIAGNOSTICS_DEFAULT } =
+      await import("@/shared/validation/settingsSchemas");
+    const settings = await getCachedSettings().catch(() => ({}));
     const toolArgumentMode = resolveToolArgumentMode(
       (settings as { toolArgumentMode?: unknown })?.toolArgumentMode as
         | Parameters<typeof resolveToolArgumentMode>[0]
@@ -2453,17 +2455,14 @@ export async function handleChatCore({
       provider,
       forwardingLane as "claude-oauth-prefixed" | null
     );
-    const sseDiagnosticsConfig =
-      ((settings as { sseDiagnostics?: unknown })?.sseDiagnostics as
-        | {
-            captureProviderRawSSELines: boolean;
-            captureProviderParsedEvents: boolean;
-            captureTranslatedOpenAISSE: boolean;
-            keepLastNDebugRequests: number;
-            maxDebugBundleSizeMB: number;
-            maxActiveDebugBundles: number;
-          }
-        | undefined) ?? null;
+    const rawSseDiagnostics = (settings as { sseDiagnostics?: unknown }).sseDiagnostics;
+    const parsedSseDiagnostics = sseDiagnosticsSettingsSchema.safeParse({
+      ...SSE_DIAGNOSTICS_DEFAULT,
+      ...(rawSseDiagnostics && typeof rawSseDiagnostics === "object" ? rawSseDiagnostics : {}),
+    });
+    const sseDiagnosticsConfig = parsedSseDiagnostics.success
+      ? parsedSseDiagnostics.data
+      : SSE_DIAGNOSTICS_DEFAULT;
     transformStream = createSSETransformStreamWithLogger(
       targetFormat,
       clientResponseFormat,

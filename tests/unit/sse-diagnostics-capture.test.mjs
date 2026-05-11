@@ -132,12 +132,14 @@ test("keepLastNDebugRequests prunes oldest bundles", async () => {
 
 test("maxDebugBundleSizeMB enforcement sets _capture_overflow", async () => {
   const mod = await loadModule();
-  const tinyCap = { ...DEFAULT_CONFIG, captureProviderRawSSELines: true, maxDebugBundleSizeMB: 0 };
+  const tinyCap = { ...DEFAULT_CONFIG, captureProviderRawSSELines: true, maxDebugBundleSizeMB: 1 };
   const bundle = mod.tryCreateBundle(tinyCap, {
     provider: "claude",
     model: "claude-opus-4-7",
   });
-  mod.appendRawLine(bundle, 0, "x");
+  // 1MB cap with a 2MB line forces overflow on the first append.
+  const oversized = "x".repeat(2 * 1024 * 1024);
+  mod.appendRawLine(bundle, 0, oversized);
   await mod.finalizeBundle(bundle, "flush");
   const files = readdirSync(diagDir());
   const payload = JSON.parse(readFileSync(join(diagDir(), files[0]), "utf8"));
@@ -197,6 +199,56 @@ test("appendRawLine no-op when bundle is null", async () => {
   mod.appendTranslatedChunk(null, { choices: [] });
   await mod.finalizeBundle(null, "flush");
   assert.equal(existsSync(diagDir()), false);
+});
+
+test("tryCreateBundle rejects malformed numeric config (Copilot defensive validation)", async () => {
+  const mod = await loadModule();
+  const baseConfig = { ...DEFAULT_CONFIG, captureProviderRawSSELines: true };
+
+  assert.equal(
+    mod.tryCreateBundle(
+      { ...baseConfig, maxDebugBundleSizeMB: Number.NaN },
+      { provider: "claude" }
+    ),
+    null,
+    "NaN size cap must not produce a bundle"
+  );
+  assert.equal(
+    mod.tryCreateBundle({ ...baseConfig, keepLastNDebugRequests: -5 }, { provider: "claude" }),
+    null,
+    "negative keepLastN must not produce a bundle"
+  );
+  assert.equal(
+    mod.tryCreateBundle({ ...baseConfig, maxActiveDebugBundles: 1.5 }, { provider: "claude" }),
+    null,
+    "non-integer maxActive must not produce a bundle"
+  );
+  assert.equal(
+    mod.tryCreateBundle({ ...baseConfig, maxDebugBundleSizeMB: 99999 }, { provider: "claude" }),
+    null,
+    "out-of-range size cap must not produce a bundle"
+  );
+  assert.equal(
+    mod.tryCreateBundle({ ...baseConfig, maxActiveDebugBundles: "5" }, { provider: "claude" }),
+    null,
+    "string-typed numeric field must not produce a bundle"
+  );
+});
+
+test("tryCreateBundle coerces booleans defensively (truthy non-boolean does not enable capture)", async () => {
+  const mod = await loadModule();
+  const bundle = mod.tryCreateBundle(
+    {
+      captureProviderRawSSELines: 1,
+      captureProviderParsedEvents: "yes",
+      captureTranslatedOpenAISSE: {},
+      keepLastNDebugRequests: 20,
+      maxDebugBundleSizeMB: 100,
+      maxActiveDebugBundles: 5,
+    },
+    { provider: "claude" }
+  );
+  assert.equal(bundle, null, "non-boolean truthy values must not silently enable capture");
 });
 
 test("client_abort path via createDisconnectAwareStream finalizes the bundle (reviewer change request #1)", async () => {

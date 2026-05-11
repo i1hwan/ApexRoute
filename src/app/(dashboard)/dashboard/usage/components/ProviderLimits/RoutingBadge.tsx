@@ -35,6 +35,15 @@ function formatNum(value: number | null | undefined, digits = 0): string {
   return value.toFixed(digits);
 }
 
+// Format a quota percentage for display. Positive sub-1% values must not be
+// rounded down to 0% — that visually collides with the hard-excluded ≤0% case
+// and erodes operator trust in the LowQuota bypass indicator.
+export function formatPct(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return "—";
+  if (value > 0 && value < 1) return "<1";
+  return Math.round(value).toString();
+}
+
 export function getExcludedI18nKey(reason: string | null): string {
   switch (reason) {
     case "inactive":
@@ -210,7 +219,7 @@ export default function RoutingBadge({ entry }: RoutingBadgeProps) {
               label={t("routingScoreSession")}
               value={
                 Number.isFinite(entry.breakdown?.sessionRemainingPct)
-                  ? `${formatNum(entry.breakdown?.sessionRemainingPct, 0)}%`
+                  ? `${formatPct(entry.breakdown?.sessionRemainingPct)}%`
                   : "—"
               }
             />
@@ -218,7 +227,7 @@ export default function RoutingBadge({ entry }: RoutingBadgeProps) {
               label={t("routingScoreWeekly")}
               value={
                 Number.isFinite(entry.breakdown?.weeklyRemainingPct)
-                  ? `${formatNum(entry.breakdown?.weeklyRemainingPct, 0)}%`
+                  ? `${formatPct(entry.breakdown?.weeklyRemainingPct)}%`
                   : "—"
               }
             />
@@ -253,8 +262,8 @@ export default function RoutingBadge({ entry }: RoutingBadgeProps) {
             {nearDepletion ? (
               <div className="mt-1 pt-1 border-t border-white/10 text-amber-300 leading-snug">
                 {t("routingPriorityNearDepletionTooltip", {
-                  s: formatNum(sessionPct, 0),
-                  w: formatNum(weeklyPct, 0),
+                  s: formatPct(sessionPct),
+                  w: formatPct(weeklyPct),
                 })}
               </div>
             ) : null}

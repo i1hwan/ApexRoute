@@ -58,6 +58,26 @@ test("RoutingBadge.tsx uses 'warning' variant for near-depletion (amber styling)
   assert.match(source, /nearDepletion[\s\S]*?\?\s*"warning"/);
 });
 
+test("formatPct preserves sub-1% values as <1 instead of rounding to 0 (Copilot review)", () => {
+  const FORMAT_PCT_BODY_RE =
+    /export function formatPct\s*\([^)]*\)\s*:\s*string\s*\{([\s\S]*?)\n\}/;
+  const fnMatch = source.match(FORMAT_PCT_BODY_RE);
+  if (!fnMatch) {
+    throw new Error("formatPct body not found in RoutingBadge.tsx");
+  }
+  const formatPct = /* eslint-disable-line no-new-func */ new Function("value", fnMatch[1]);
+
+  assert.equal(formatPct(null), "—");
+  assert.equal(formatPct(undefined), "—");
+  assert.equal(formatPct(Number.NaN), "—");
+  assert.equal(formatPct(0), "0");
+  assert.equal(formatPct(0.1), "<1", "0.1% must not round to 0% (hard-exclude collision)");
+  assert.equal(formatPct(0.9), "<1");
+  assert.equal(formatPct(1), "1");
+  assert.equal(formatPct(4.3), "4");
+  assert.equal(formatPct(95.5), "96");
+});
+
 test("ProviderLimits index has Compatibility deep-link", () => {
   const INDEX_PATH = join(
     __dirname,

@@ -61,12 +61,41 @@ export function isAnyCaptureEnabled(config: BundleConfig): boolean {
   );
 }
 
+function normalizeIntInRange(value: unknown, min: number, max: number): number | null {
+  return typeof value === "number" && Number.isInteger(value) && value >= min && value <= max
+    ? value
+    : null;
+}
+
+function normalizeBundleConfig(config: BundleConfig): BundleConfig | null {
+  const keepLastNDebugRequests = normalizeIntInRange(config.keepLastNDebugRequests, 1, 1000);
+  const maxDebugBundleSizeMB = normalizeIntInRange(config.maxDebugBundleSizeMB, 1, 1000);
+  const maxActiveDebugBundles = normalizeIntInRange(config.maxActiveDebugBundles, 1, 50);
+  if (
+    keepLastNDebugRequests === null ||
+    maxDebugBundleSizeMB === null ||
+    maxActiveDebugBundles === null
+  ) {
+    return null;
+  }
+  return {
+    captureProviderRawSSELines: config.captureProviderRawSSELines === true,
+    captureProviderParsedEvents: config.captureProviderParsedEvents === true,
+    captureTranslatedOpenAISSE: config.captureTranslatedOpenAISSE === true,
+    keepLastNDebugRequests,
+    maxDebugBundleSizeMB,
+    maxActiveDebugBundles,
+  };
+}
+
 export function tryCreateBundle(
   config: BundleConfig,
   meta: Pick<BundleMetadata, "provider" | "model" | "targetFormat" | "sourceFormat">
 ): CaptureBundle | null {
-  if (!isAnyCaptureEnabled(config)) return null;
-  if (activeBundleCount >= config.maxActiveDebugBundles) return null;
+  const normalized = normalizeBundleConfig(config);
+  if (!normalized) return null;
+  if (!isAnyCaptureEnabled(normalized)) return null;
+  if (activeBundleCount >= normalized.maxActiveDebugBundles) return null;
   activeBundleCount += 1;
   return {
     metadata: {
@@ -74,7 +103,7 @@ export function tryCreateBundle(
       startedAt: Date.now(),
       ...meta,
     },
-    config,
+    config: normalized,
     provider_raw_lines: [],
     provider_parsed_events: [],
     translated_openai_chunks: [],
