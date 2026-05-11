@@ -33,6 +33,7 @@ import {
   appendParsedEvent,
   appendTranslatedChunk,
   finalizeBundle,
+  registerBundle,
 } from "./sseDiagnosticsBundle.ts";
 
 export { COLORS, formatSSE };
@@ -227,7 +228,7 @@ export function createSSEStream(options: StreamOptions = {}) {
   let idleTimer: ReturnType<typeof setInterval> | null = null;
   let streamTimedOut = false;
 
-  return new TransformStream(
+  const transformStream = new TransformStream(
     {
       start(controller) {
         // Start idle watchdog — checks every 10s if provider has stopped sending
@@ -812,9 +813,13 @@ export function createSSEStream(options: StreamOptions = {}) {
 
           // Translate mode: process remaining buffer
           if (buffer.trim()) {
+            if (diagnosticsBundle && buffer.trim().startsWith("data:")) {
+              appendRawLine(diagnosticsBundle, providerLineCounter++, buffer);
+            }
             const parsed = parseSSELine(buffer.trim());
             if (parsed && !parsed.done) {
               providerPayloadCollector.push(parsed);
+              appendParsedEvent(diagnosticsBundle, parsed);
               // Extract usage from remaining buffer — if the usage-bearing event
               // (e.g. response.completed) is the last SSE line, it ends up here
               // in the flush handler where extractUsage was not called.
@@ -846,6 +851,7 @@ export function createSSEStream(options: StreamOptions = {}) {
                 for (const item of translated) {
                   const output = formatSSE(item, sourceFormat);
                   clientPayloadCollector.push(item);
+                  appendTranslatedChunk(diagnosticsBundle, item);
                   reqLogger?.appendConvertedChunk?.(output);
                   controller.enqueue(encoder.encode(output));
                 }
@@ -1017,6 +1023,10 @@ export function createSSEStream(options: StreamOptions = {}) {
     // Readable side backpressure — limit queued output chunks
     { highWaterMark: 16 }
   );
+
+  registerBundle(transformStream, diagnosticsBundle);
+
+  return transformStream;
 }
 
 // Convenience functions for backward compatibility

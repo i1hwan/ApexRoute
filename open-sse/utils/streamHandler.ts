@@ -1,5 +1,7 @@
 // Stream handler with disconnect detection - shared for all providers
 
+import { lookupBundle, finalizeBundle } from "./sseDiagnosticsBundle.ts";
+
 type StreamDisconnectEvent = {
   reason: string;
   duration: number;
@@ -116,6 +118,12 @@ export function createStreamController({
 export function createDisconnectAwareStream(transformStream, streamController) {
   const reader = transformStream.readable.getReader();
   const writer = transformStream.writable.getWriter();
+  // Diagnostics bundles live in a closure inside createSSEStream() and are
+  // unreachable from this disconnect path through normal references. The
+  // WeakMap registry lets us finalize them on cancel/abort BEFORE reader.cancel
+  // short-circuits TransformStream.flush() (which would otherwise be the only
+  // finalize site and would never run on client-disconnect).
+  const diagnosticsBundle = lookupBundle(transformStream);
 
   return new ReadableStream({
     async pull(controller) {
@@ -169,6 +177,13 @@ export function createDisconnectAwareStream(transformStream, streamController) {
 
     cancel(reason) {
       streamController.handleDisconnect(reason || "cancelled");
+      if (diagnosticsBundle) {
+        void finalizeBundle(
+          diagnosticsBundle,
+          "client_abort",
+          typeof reason === "string" ? reason : undefined
+        );
+      }
       reader.cancel();
       writer.abort();
     },

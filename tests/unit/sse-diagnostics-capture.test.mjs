@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, readFileSync, readdirSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const ORIGINAL_DATA_DIR = process.env.DATA_DIR;
 let tmpDir;
@@ -186,6 +187,46 @@ test("appendRawLine no-op when bundle is null", async () => {
   assert.equal(existsSync(diagDir()), false);
 });
 
+test("client_abort path via createDisconnectAwareStream finalizes the bundle (reviewer change request #1)", async () => {
+  const diagMod = await loadModule();
+  const { createStreamController, createDisconnectAwareStream } =
+    await import("../../open-sse/utils/streamHandler.ts");
+
+  // Build a real bundle, register it on a dummy transformStream object,
+  // then route through createDisconnectAwareStream and cancel the readable
+  // to assert finalize fires with termination='client_abort'.
+  const bundle = diagMod.tryCreateBundle(
+    { ...DEFAULT_CONFIG, captureProviderRawSSELines: true },
+    { provider: "claude" }
+  );
+  diagMod.appendRawLine(bundle, 0, "data: hello");
+
+  const dummy = new TransformStream({
+    transform(chunk, controller) {
+      controller.enqueue(chunk);
+    },
+  });
+  diagMod.registerBundle(dummy, bundle);
+
+  const controller = createStreamController({ provider: "claude", model: "claude-opus-4-7" });
+  // createDisconnectAwareStream grabs the writer itself, so don't pre-acquire
+  // it here. Just consume the readable side and cancel it to trigger the
+  // disconnect path.
+  const readable = createDisconnectAwareStream(dummy, controller);
+  const reader = readable.getReader();
+  await reader.cancel("client closed connection");
+
+  // Give the async finalize one tick to land on disk
+  await new Promise((r) => setTimeout(r, 50));
+
+  const files = readdirSync(diagDir()).filter((f) => f.endsWith(".json"));
+  assert.equal(files.length, 1);
+  const payload = JSON.parse(readFileSync(join(diagDir(), files[0]), "utf8"));
+  assert.equal(payload.metadata.termination, "client_abort");
+  assert.equal(payload.metadata.terminationDetail, "client closed connection");
+  assert.equal(payload.provider_raw_lines.length, 1);
+});
+
 test("finalizeBundle is idempotent — second call is a no-op (defense against double-finalize)", async () => {
   const mod = await loadModule();
   const bundle = mod.tryCreateBundle(
@@ -207,6 +248,33 @@ test("finalizeBundle is idempotent — second call is a no-op (defense against d
   // Original termination preserved
   const payload = JSON.parse(readFileSync(join(diagDir(), filesAfterFirst[0]), "utf8"));
   assert.equal(payload.metadata.termination, "flush");
+});
+
+test("flush() remaining buffer is captured into diagnostics (reviewer change request #2)", async () => {
+  // Static check: stream.ts flush() must wire the same 3 capture hooks the
+  // transform() loop uses. Without this, a trailing-newline-less last SSE
+  // line is logged into provider_response summary but missed by raw/parsed/
+  // translated bundle capture.
+  const __dirname = fileURLToPath(new URL(".", import.meta.url));
+  const streamSrc = readFileSync(
+    join(__dirname, "..", "..", "open-sse", "utils", "stream.ts"),
+    "utf8"
+  );
+  const flushRe = /\/\/ Translate mode: process remaining buffer[\s\S]*?\n\s{10}\}\n/;
+  const flushBlock = streamSrc.match(flushRe);
+  assert.ok(flushBlock, "flush() translate-mode remaining-buffer block not found");
+  const body = flushBlock[0];
+  assert.match(body, /appendRawLine\(diagnosticsBundle/, "flush remaining must capture raw line");
+  assert.match(
+    body,
+    /appendParsedEvent\(diagnosticsBundle/,
+    "flush remaining must capture parsed event"
+  );
+  assert.match(
+    body,
+    /appendTranslatedChunk\(diagnosticsBundle/,
+    "flush remaining must capture translated chunk"
+  );
 });
 
 test("clear route deletes all bundle files", async () => {

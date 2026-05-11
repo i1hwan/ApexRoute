@@ -39,6 +39,20 @@ interface CaptureBundle {
 
 let activeBundleCount = 0;
 
+// TransformStream → bundle registry. createDisconnectAwareStream consults this
+// on cancel/abort to finalize the bundle with termination='client_abort' BEFORE
+// the underlying reader.cancel() short-circuits the flush() path.
+const bundleByTransformStream = new WeakMap<object, CaptureBundle>();
+
+export function registerBundle(transformStream: object, bundle: CaptureBundle | null): void {
+  if (!bundle) return;
+  bundleByTransformStream.set(transformStream, bundle);
+}
+
+export function lookupBundle(transformStream: object): CaptureBundle | null {
+  return bundleByTransformStream.get(transformStream) ?? null;
+}
+
 export function isAnyCaptureEnabled(config: BundleConfig): boolean {
   return (
     config.captureProviderRawSSELines ||
