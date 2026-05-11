@@ -22,6 +22,7 @@ import MemorySkillsTab from "./components/MemorySkillsTab";
 import ModelsDevSyncTab from "./components/ModelsDevSyncTab";
 import ResilienceTab from "./components/ResilienceTab";
 import CliproxyapiSettingsTab from "./components/CliproxyapiSettingsTab";
+import CompatibilityTab from "./components/CompatibilityTab";
 
 const tabs = [
   { id: "general", labelKey: "general", icon: "settings" },
@@ -30,6 +31,7 @@ const tabs = [
   { id: "security", labelKey: "security", icon: "shield" },
   { id: "routing", labelKey: "routing", icon: "route" },
   { id: "resilience", labelKey: "resilience", icon: "electrical_services" },
+  { id: "compatibility", labelKey: "compatibility", icon: "tune" },
   { id: "advanced", labelKey: "advanced", icon: "tune" },
 ];
 
@@ -113,6 +115,8 @@ export default function SettingsPage() {
           )}
 
           {activeTab === "resilience" && <ResilienceTab />}
+
+          {activeTab === "compatibility" && <CompatibilityTab />}
 
           {activeTab === "advanced" && (
             <div className="flex flex-col gap-6">
