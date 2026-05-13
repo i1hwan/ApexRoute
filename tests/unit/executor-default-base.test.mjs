@@ -94,6 +94,14 @@ test("DefaultExecutor.buildUrl handles Gemini, Claude and Qwen variants", () => 
   );
 });
 
+test("DefaultExecutor.buildUrl sends OpenAI Codex-family models to Responses API", () => {
+  const openai = new DefaultExecutor("openai");
+
+  assert.equal(openai.buildUrl("gpt-5-codex", true), "https://api.openai.com/v1/responses");
+  assert.equal(openai.buildUrl("gpt-5.3-codex-spark", true), "https://api.openai.com/v1/responses");
+  assert.equal(openai.buildUrl("gpt-5.5", true), "https://api.openai.com/v1/chat/completions");
+});
+
 test("DefaultExecutor.buildUrl handles openai-compatible and anthropic-compatible providers", () => {
   const openAICompat = new DefaultExecutor("openai-compatible-test");
   const openAIResponsesCompat = new DefaultExecutor("openai-compatible-responses-test");

@@ -130,6 +130,62 @@ test("provider models route falls back after OpenAI-compatible endpoint probes a
   assert.ok(seenUrls.length >= 2);
 });
 
+test("provider models route tries OpenAI-compatible custom modelsPath first", async () => {
+  const connection = await seedConnection("openai-compatible-custom-path", {
+    apiKey: "sk-openai-compatible",
+    providerSpecificData: {
+      baseUrl: "https://proxy.example.com/v1",
+      modelsPath: "/custom-models",
+    },
+  });
+  const seenUrls = [];
+
+  globalThis.fetch = async (url, init = {}) => {
+    seenUrls.push(String(url));
+    assert.equal(init.headers.Authorization, "Bearer sk-openai-compatible");
+    return Response.json({
+      data: [{ id: "edge-model", name: "Edge Model" }],
+    });
+  };
+
+  const response = await callRoute(connection.id);
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(seenUrls[0], "https://proxy.example.com/v1/custom-models");
+  assert.deepEqual(body.models, [{ id: "edge-model", name: "Edge Model" }]);
+  assert.equal(body.source, "api");
+});
+
+test("provider models route normalizes chat endpoint base before custom modelsPath", async () => {
+  const connection = await seedConnection("openai-compatible-custom-path-chat-base", {
+    apiKey: "sk-openai-compatible",
+    providerSpecificData: {
+      baseUrl: "https://proxy.example.com/v1/chat/completions",
+      modelsPath: "/models",
+    },
+  });
+  const seenUrls = [];
+
+  globalThis.fetch = async (url) => {
+    const urlString = String(url);
+    seenUrls.push(urlString);
+    if (urlString === "https://proxy.example.com/v1/models") {
+      return Response.json({
+        data: [{ id: "edge-model", name: "Edge Model" }],
+      });
+    }
+    return new Response("wrong endpoint", { status: 401 });
+  };
+
+  const response = await callRoute(connection.id);
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(seenUrls[0], "https://proxy.example.com/v1/models");
+  assert.deepEqual(body.models, [{ id: "edge-model", name: "Edge Model" }]);
+});
+
 test("provider models route returns static catalog entries for providers with hardcoded models", async () => {
   const connection = await seedConnection("bailian-coding-plan", {
     apiKey: "bailian-key",
@@ -224,6 +280,32 @@ test("provider models route filters hidden models from the static Claude catalog
     false
   );
   assert.ok(body.models.some((model) => model.id === "claude-opus-4-6"));
+  assert.ok(body.models.some((model) => model.id === "claude-opus-4-7"));
+});
+
+test("provider models route returns Codex registry catalog without remote listing", async () => {
+  const connection = await seedConnection("codex", {
+    authType: "oauth",
+    accessToken: "codex-access",
+    apiKey: null,
+  });
+
+  globalThis.fetch = async () => {
+    throw new Error("Codex model listing must stay local");
+  };
+
+  const response = await callRoute(connection.id);
+  const body = await response.json();
+  const modelIds = body.models.map((model) => model.id);
+
+  assert.equal(response.status, 200);
+  assert.equal(body.provider, "codex");
+  assert.ok(modelIds.includes("gpt-5.5"));
+  assert.ok(modelIds.includes("gpt-5.5-pro"));
+  assert.ok(modelIds.includes("gpt-5.5-none"));
+  assert.ok(modelIds.includes("gpt-5.4-pro"));
+  assert.ok(modelIds.includes("gpt-5.4-nano"));
+  assert.ok(modelIds.includes("gpt-5.3-codex-spark"));
 });
 
 test("provider models route rejects Anthropic-compatible providers without a base URL", async () => {
@@ -272,6 +354,30 @@ test("provider models route trims Anthropic-compatible message URLs and filters 
 
   assert.equal(response.status, 200);
   assert.deepEqual(body.models, [{ id: "visible-model", name: "Visible Model" }]);
+});
+
+test("provider models route uses Anthropic-compatible custom modelsPath", async () => {
+  const connection = await seedConnection("anthropic-compatible-custom-path", {
+    apiKey: "sk-anthropic-compatible",
+    providerSpecificData: {
+      baseUrl: "https://proxy.example.com/v1/messages",
+      modelsPath: "/custom-models",
+    },
+  });
+
+  globalThis.fetch = async (url, init = {}) => {
+    assert.equal(String(url), "https://proxy.example.com/v1/custom-models");
+    assert.equal(init.headers["x-api-key"], "sk-anthropic-compatible");
+    return Response.json({
+      data: [{ id: "claude-edge", name: "Claude Edge" }],
+    });
+  };
+
+  const response = await callRoute(connection.id);
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(body.models, [{ id: "claude-edge", name: "Claude Edge" }]);
 });
 
 test("provider models route forwards Anthropic-compatible upstream failures", async () => {

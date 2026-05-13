@@ -1,8 +1,54 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-context-manager-"));
+process.env.DATA_DIR = TEST_DATA_DIR;
 
 const { compressContext, estimateTokens, getTokenLimit } =
   await import("../../open-sse/services/contextManager.ts");
+const core = await import("../../src/lib/db/core.ts");
+const { getModelSpec } = await import("../../src/shared/constants/modelSpecs.ts");
+const { saveModelsDevCapabilities } = await import("../../src/lib/modelsDevSync.ts");
+
+function capabilityEntry(limitContext) {
+  return {
+    tool_call: true,
+    reasoning: true,
+    attachment: true,
+    structured_output: true,
+    temperature: true,
+    modalities_input: JSON.stringify(["text"]),
+    modalities_output: JSON.stringify(["text"]),
+    knowledge_cutoff: null,
+    release_date: null,
+    last_updated: null,
+    status: null,
+    family: null,
+    open_weights: false,
+    limit_context: limitContext,
+    limit_input: limitContext,
+    limit_output: 4096,
+    interleaved_field: null,
+  };
+}
+
+async function resetStorage() {
+  core.resetDbInstance();
+  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
+  fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+}
+
+test.beforeEach(async () => {
+  await resetStorage();
+});
+
+test.after(() => {
+  core.resetDbInstance();
+  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
+});
 
 // ─── estimateTokens ─────────────────────────────────────────────────────────
 
@@ -24,6 +70,44 @@ test("getTokenLimit: detects claude", () => {
 
 test("getTokenLimit: detects gemini", () => {
   assert.equal(getTokenLimit("gemini", "gemini-2.5-pro"), 1048576);
+});
+
+test("getTokenLimit: uses registry per-model context length before provider default", () => {
+  assert.equal(getTokenLimit("codex", "gpt-5.5"), 400000);
+});
+
+test("getTokenLimit: registry caps override stale synced alias context", () => {
+  saveModelsDevCapabilities({
+    cx: {
+      "gpt-5.5": capabilityEntry(1050000),
+    },
+    claude: {
+      "claude-opus-4-7": capabilityEntry(200000),
+    },
+  });
+
+  assert.equal(getTokenLimit("codex", "gpt-5.5"), 400000);
+  assert.equal(getTokenLimit("cx", "gpt-5.5"), 400000);
+  assert.equal(getTokenLimit("claude", "claude-opus-4-7"), 1000000);
+  assert.equal(getTokenLimit("cc", "claude-opus-4-7"), 1000000);
+});
+
+test("getTokenLimit: Codex aliases keep provider-scoped caps while generic specs stay public", () => {
+  assert.equal(getModelSpec("gpt-5.5").contextWindow, 1050000);
+  assert.equal(getTokenLimit("codex", "gpt-5.5"), 400000);
+  assert.equal(getTokenLimit("cx", "gpt5.5"), 400000);
+  assert.equal(getTokenLimit("cx", "gpt5.5-pro"), 400000);
+  assert.equal(getTokenLimit("codex", "gpt-5.3-codex-spark"), 128000);
+});
+
+test("getTokenLimit: models.dev alias data still applies to unknown registry models", () => {
+  saveModelsDevCapabilities({
+    cx: {
+      "future-codex-model": capabilityEntry(777000),
+    },
+  });
+
+  assert.equal(getTokenLimit("codex", "future-codex-model"), 777000);
 });
 
 test("getTokenLimit: default fallback", () => {

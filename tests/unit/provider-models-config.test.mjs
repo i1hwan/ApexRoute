@@ -42,6 +42,15 @@ test("provider models helpers validate and resolve model metadata", () => {
   assert.equal(getModelTargetFormat("missing-provider", "missing-model"), null);
 });
 
+test("provider models helpers expose OpenAI GPT 5.x without changing chat-completions default", () => {
+  assert.equal(getDefaultModel("openai"), "gpt-4o");
+  assert.equal(isValidModel("openai", "gpt-5.5"), true);
+  assert.equal(isValidModel("openai", "gpt-5.3-codex-spark"), true);
+  assert.equal(isValidModel("openai", "gpt-5.1-codex"), true);
+  assert.equal(isValidModel("openai", "gpt-5-codex"), true);
+  assert.equal(getModelTargetFormat("openai", "gpt-5.5"), null);
+});
+
 test("provider models helpers resolve provider IDs through aliases", () => {
   const firstProviderId = Object.keys(PROVIDER_ID_TO_ALIAS)[0];
   const alias = PROVIDER_ID_TO_ALIAS[firstProviderId] || firstProviderId;

@@ -9,6 +9,7 @@ process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
 const providersDb = await import("../../src/lib/db/providers.ts");
+const modelsDb = await import("../../src/lib/db/models.ts");
 const {
   resolveModelOrError,
   checkPipelineGates,
@@ -23,11 +24,31 @@ const { setModelUnavailable, resetAllAvailability } =
 const { getCircuitBreaker, resetAllCircuitBreakers, CircuitBreakerOpenError, STATE } =
   await import("../../src/shared/utils/circuitBreaker.ts");
 
+async function removeTestDataDir() {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    try {
+      if (fs.existsSync(TEST_DATA_DIR)) {
+        fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
+      }
+      return;
+    } catch (error) {
+      if (
+        (error?.code === "EBUSY" || error?.code === "EPERM" || error?.code === "ENOTEMPTY") &&
+        attempt < 9
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
+        continue;
+      }
+      throw error;
+    }
+  }
+}
+
 async function resetStorage() {
   resetAllAvailability();
   resetAllCircuitBreakers();
   core.resetDbInstance();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
+  await removeTestDataDir();
   fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
 }
 
@@ -49,7 +70,7 @@ test.beforeEach(async () => {
 
 test.after(async () => {
   await resetStorage();
-  fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
+  await removeTestDataDir();
 });
 
 test("resolveModelOrError rejects ambiguous aliases without a provider prefix", async () => {
@@ -76,6 +97,56 @@ test("resolveModelOrError rejects malformed model strings", async () => {
   assert.equal(result.error.status, 400);
   const json = await result.error.json();
   assert.match(json.error.message, /Invalid model format/i);
+});
+
+test("resolveModelOrError does not freeze provider-node default API type before credentials load", async () => {
+  await providersDb.createProviderNode({
+    id: "openai-compatible-sp-openai",
+    type: "openai-compatible",
+    name: "Responses Gateway",
+    prefix: "sp",
+    apiType: "responses",
+    baseUrl: "https://proxy.example.com/v1",
+  });
+
+  const result = await resolveModelOrError(
+    "sp/gpt-5.4",
+    { messages: [{ role: "user", content: "hello" }] },
+    "/v1/chat/completions"
+  );
+
+  assert.equal(result.provider, "openai-compatible-sp-openai");
+  assert.equal(result.model, "gpt-5.4");
+  assert.equal(result.targetFormat, undefined);
+});
+
+test("resolveModelOrError still forwards explicit custom model response format", async () => {
+  await providersDb.createProviderNode({
+    id: "openai-compatible-custom",
+    type: "openai-compatible",
+    name: "Custom Gateway",
+    prefix: "edge",
+    apiType: "chat",
+    baseUrl: "https://proxy.example.com/v1",
+  });
+  await modelsDb.addCustomModel(
+    "openai-compatible-custom",
+    "edge-responses",
+    "Edge Responses",
+    "manual",
+    "responses",
+    ["chat"]
+  );
+
+  const result = await resolveModelOrError(
+    "edge/edge-responses",
+    { messages: [{ role: "user", content: "hello" }] },
+    "/v1/chat/completions"
+  );
+
+  assert.equal(result.provider, "openai-compatible-custom");
+  assert.equal(result.model, "edge-responses");
+  assert.equal(result.targetFormat, "openai-responses");
 });
 
 test("checkPipelineGates blocks models in cooldown", async () => {

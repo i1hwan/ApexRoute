@@ -24,7 +24,7 @@ export const CLI_TOOLS = {
         name: "Claude Opus",
         alias: "opus",
         envKey: "ANTHROPIC_DEFAULT_OPUS_MODEL",
-        defaultValue: "cc/claude-opus-4-5-20251101",
+        defaultValue: "cc/claude-opus-4-7",
       },
       {
         id: "sonnet",

@@ -26,6 +26,206 @@ export interface ModelSpec {
 }
 
 export const MODEL_SPECS: Record<string, ModelSpec> = {
+  // ── OpenAI Codex GPT 5.5 ───────────────────────────────────────
+  "gpt-5.5": {
+    maxOutputTokens: 128000,
+    contextWindow: 1050000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+    aliases: [
+      "gpt5.5",
+      "gpt-5.5-xhigh",
+      "gpt-5.5-high",
+      "gpt-5.5-medium",
+      "gpt-5.5-low",
+      "gpt-5.5-none",
+    ],
+  },
+  "gpt-5.5-pro": {
+    maxOutputTokens: 128000,
+    contextWindow: 1050000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+    aliases: ["gpt5.5-pro"],
+  },
+
+  // ── OpenAI/Codex GPT 5.x ───────────────────────────────────────
+  "gpt-5.4": {
+    maxOutputTokens: 128000,
+    contextWindow: 1050000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+    aliases: ["gpt5.4"],
+  },
+  "gpt-5.4-pro": {
+    maxOutputTokens: 128000,
+    contextWindow: 1050000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+    aliases: ["gpt5.4-pro"],
+  },
+  "gpt-5.4-mini": {
+    maxOutputTokens: 128000,
+    contextWindow: 400000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+    aliases: ["gpt5.4-mini"],
+  },
+  "gpt-5.4-nano": {
+    maxOutputTokens: 128000,
+    contextWindow: 400000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+    aliases: ["gpt5.4-nano"],
+  },
+  "gpt-5.3-codex-spark": {
+    maxOutputTokens: 32000,
+    contextWindow: 128000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+    aliases: [
+      "gpt-5.3-codex-spark-xhigh",
+      "gpt-5.3-codex-spark-high",
+      "gpt-5.3-codex-spark-medium",
+      "gpt-5.3-codex-spark-low",
+      "gpt-5.3-codex-spark-none",
+    ],
+  },
+  "gpt-5.3-codex": {
+    maxOutputTokens: 128000,
+    contextWindow: 400000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+    aliases: [
+      "gpt-5.3-codex-xhigh",
+      "gpt-5.3-codex-high",
+      "gpt-5.3-codex-medium",
+      "gpt-5.3-codex-low",
+      "gpt-5.3-codex-none",
+    ],
+  },
+  "gpt-5.3-chat-latest": {
+    maxOutputTokens: 16384,
+    contextWindow: 128000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+  },
+  "gpt-5.2-codex": {
+    maxOutputTokens: 128000,
+    contextWindow: 400000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+  },
+  "gpt-5.2": {
+    maxOutputTokens: 128000,
+    contextWindow: 400000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+  },
+  "gpt-5.2-chat-latest": {
+    maxOutputTokens: 16384,
+    contextWindow: 128000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+  },
+  "gpt-5.2-pro": {
+    maxOutputTokens: 128000,
+    contextWindow: 400000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+  },
+  "gpt-5.1": {
+    maxOutputTokens: 128000,
+    contextWindow: 400000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+  },
+  "gpt-5.1-chat-latest": {
+    maxOutputTokens: 16384,
+    contextWindow: 128000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+  },
+  "gpt-5.1-codex": {
+    maxOutputTokens: 128000,
+    contextWindow: 400000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+    aliases: ["gpt-5.1-codex-max"],
+  },
+  "gpt-5.1-codex-mini": {
+    maxOutputTokens: 128000,
+    contextWindow: 400000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+  },
+  "gpt-5": {
+    maxOutputTokens: 128000,
+    contextWindow: 400000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+  },
+  "gpt-5-chat-latest": {
+    maxOutputTokens: 128000,
+    contextWindow: 400000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+  },
+  "gpt-5-mini": {
+    maxOutputTokens: 128000,
+    contextWindow: 400000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+  },
+  "gpt-5-nano": {
+    maxOutputTokens: 128000,
+    contextWindow: 400000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+  },
+  "gpt-5-pro": {
+    maxOutputTokens: 272000,
+    contextWindow: 400000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+  },
+  "gpt-5-codex": {
+    maxOutputTokens: 128000,
+    contextWindow: 400000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+  },
+  "gpt-5-codex-mini": {
+    maxOutputTokens: 128000,
+    contextWindow: 400000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+  },
+
   // ── Gemini 3 Flash series ───────────────────────────────────────
   "gemini-3-flash": {
     maxOutputTokens: 65536,
@@ -63,17 +263,6 @@ export const MODEL_SPECS: Record<string, ModelSpec> = {
     aliases: ["gemini-3-pro-low"],
   },
 
-  // ── Claude Opus 4.5 ─────────────────────────────────────────────
-  "claude-opus-4-5": {
-    maxOutputTokens: 32768,
-    contextWindow: 200000,
-    defaultThinkingBudget: 10000,
-    thinkingBudgetCap: 32000,
-    supportsThinking: true,
-    supportsTools: true,
-    supportsVision: true,
-  },
-
   // ── Claude Opus 4.6 ─────────────────────────────────────────────
   "claude-opus-4-6": {
     maxOutputTokens: 128000,
@@ -91,7 +280,7 @@ export const MODEL_SPECS: Record<string, ModelSpec> = {
   // ── Claude Opus 4.7 ─────────────────────────────────────────────
   "claude-opus-4-7": {
     maxOutputTokens: 128000,
-    contextWindow: 1048576,
+    contextWindow: 1000000,
     defaultThinkingBudget: 0,
     thinkingBudgetCap: 0,
     supportsThinking: true,
@@ -117,8 +306,12 @@ export function getModelSpec(modelId: string): ModelSpec | undefined {
     if (spec.aliases?.includes(modelId)) return spec;
   }
 
-  // Prefix matching
-  for (const [key, spec] of Object.entries(MODEL_SPECS)) {
+  // Prefix matching. Check longer keys first so specific IDs like
+  // gpt-5.3-codex-spark are not swallowed by gpt-5.3-codex.
+  const specsByLongestPrefix = Object.entries(MODEL_SPECS).sort(
+    ([left], [right]) => right.length - left.length
+  );
+  for (const [key, spec] of specsByLongestPrefix) {
     if (key !== "__default__" && modelId.startsWith(key)) return spec;
   }
 

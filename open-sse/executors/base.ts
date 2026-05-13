@@ -231,6 +231,19 @@ export class BaseExecutor {
     return status === HTTP_STATUS.RATE_LIMITED && urlIndex + 1 < this.getFallbackCount();
   }
 
+  /** Last provider-specific header normalization pass after all shared merges. */
+  finalizeHeaders(
+    headers: Record<string, string>,
+    credentials: ProviderCredentials,
+    stream = true,
+    model = ""
+  ): void {
+    void headers;
+    void credentials;
+    void stream;
+    void model;
+  }
+
   // Intra-URL retry config: retry same URL before falling back to next node
   static readonly RETRY_CONFIG = { maxAttempts: 2, delayMs: 2000 };
 
@@ -320,6 +333,7 @@ export class BaseExecutor {
         }
 
         mergeUpstreamExtraHeaders(finalHeaders, upstreamExtraHeaders);
+        this.finalizeHeaders(finalHeaders, credentials, stream, model);
 
         const fetchOptions: RequestInit = {
           method: "POST",

@@ -972,6 +972,36 @@ test("handleComboChat context-optimized orders models by the largest synced cont
   assert.equal(calls[0], "openai/gpt-4o-max");
 });
 
+test("handleComboChat context-optimized uses registry caps before stale synced aliases", async () => {
+  saveModelsDevCapabilities({
+    cx: {
+      "gpt-5.3-codex-spark": capabilityEntry(999999),
+      "gpt-5.4": capabilityEntry(64000),
+    },
+  });
+
+  const calls = [];
+  const result = await handleComboChat({
+    body: {},
+    combo: {
+      name: "context-optimized-registry-cap",
+      strategy: "context-optimized",
+      models: ["cx/gpt-5.3-codex-spark", "cx/gpt-5.4"],
+    },
+    handleSingleModel: async (_body, modelStr) => {
+      calls.push(modelStr);
+      return okResponse();
+    },
+    isModelAvailable: async () => true,
+    log: createLog(),
+    settings: null,
+    allCombos: null,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(calls[0], "cx/gpt-5.4");
+});
+
 test("handleComboChat returns a 503 when every model is unavailable before execution", async () => {
   const result = await handleComboChat({
     body: {},

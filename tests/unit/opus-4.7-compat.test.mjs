@@ -8,6 +8,7 @@ import {
   isEffortSupported,
   rejectsSamplingParams,
 } from "@/shared/constants/modelSpecs";
+import { REGISTRY } from "../../open-sse/config/providerRegistry.ts";
 
 const { applyThinkingBudget, DEFAULT_THINKING_CONFIG, ensureThinkingConfig } =
   await import("../../open-sse/services/thinkingBudget.ts");
@@ -33,9 +34,24 @@ test("modelSpecs — Opus 4.7", async (t) => {
     const spec = getModelSpec("claude-opus-4-7");
 
     assert.equal(spec?.maxOutputTokens, 128000);
-    assert.equal(spec?.contextWindow, 1048576);
+    assert.equal(spec?.contextWindow, 1000000);
     assert.equal(spec?.supportsThinking, true);
   });
+
+  await t.test(
+    "registry exposes Opus 4.7 1M context for Claude OAuth and API-key providers",
+    () => {
+      const claudeModel = REGISTRY.claude.models.find((model) => model.id === "claude-opus-4-7");
+      const anthropicModel = REGISTRY.anthropic.models.find(
+        (model) => model.id === "claude-opus-4-7"
+      );
+
+      assert.equal(claudeModel?.contextLength, 1000000);
+      assert.equal(claudeModel?.maxOutputTokens, 128000);
+      assert.equal(claudeModel?.supportsReasoning, true);
+      assert.equal(anthropicModel?.contextLength, 1000000);
+    }
+  );
 
   await t.test("getModelSpec keeps Opus 4.6 on the expanded context window", () => {
     const spec = getModelSpec("claude-opus-4-6");

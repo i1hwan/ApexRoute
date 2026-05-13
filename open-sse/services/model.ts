@@ -16,9 +16,22 @@ for (const [id, alias] of Object.entries(PROVIDER_ID_TO_ALIAS)) {
 // Provider-scoped legacy model aliases. Used to normalize provider/model inputs
 // and keep backward compatibility when upstream IDs change.
 const PROVIDER_MODEL_ALIASES = {
+  codex: {
+    "gpt5.5": "gpt-5.5",
+    "gpt5.5-pro": "gpt-5.5-pro",
+    "gpt5.5-xhigh": "gpt-5.5-xhigh",
+    "gpt5.5-high": "gpt-5.5-high",
+    "gpt5.5-medium": "gpt-5.5-medium",
+    "gpt5.5-low": "gpt-5.5-low",
+    "gpt5.5-none": "gpt-5.5-none",
+    "gpt5.4": "gpt-5.4",
+    "gpt5.4-pro": "gpt-5.4-pro",
+    "gpt5.4-mini": "gpt-5.4-mini",
+    "gpt5.4-nano": "gpt-5.4-nano",
+  },
   github: {
-    "claude-4.5-opus": "claude-opus-4-5-20251101",
-    "claude-opus-4.5": "claude-opus-4-5-20251101",
+    "claude-4.5-opus": "claude-opus-4.6",
+    "claude-opus-4.5": "claude-opus-4.6",
     "gemini-3-pro": "gemini-3.1-pro-preview",
     "gemini-3-pro-preview": "gemini-3.1-pro-preview",
     "gemini-3-flash": "gemini-3-flash-preview",
@@ -38,6 +51,63 @@ const PROVIDER_MODEL_ALIASES = {
   },
   antigravity: {},
 };
+
+const CODEX_PREFERRED_BARE_MODELS = new Set([
+  "gpt-5.5",
+  "gpt-5.5-pro",
+  "gpt-5.5-xhigh",
+  "gpt-5.5-high",
+  "gpt-5.5-medium",
+  "gpt-5.5-low",
+  "gpt-5.5-none",
+  "gpt-5.4",
+  "gpt-5.4-pro",
+  "gpt-5.4-mini",
+  "gpt-5.4-nano",
+  "gpt-5.3-codex",
+  "gpt-5.3-codex-xhigh",
+  "gpt-5.3-codex-high",
+  "gpt-5.3-codex-medium",
+  "gpt-5.3-codex-low",
+  "gpt-5.3-codex-none",
+  "gpt-5.3-codex-spark",
+  "gpt-5.3-codex-spark-xhigh",
+  "gpt-5.3-codex-spark-high",
+  "gpt-5.3-codex-spark-medium",
+  "gpt-5.3-codex-spark-low",
+  "gpt-5.3-codex-spark-none",
+  "gpt-5.2",
+  "gpt-5.2-codex",
+  "gpt-5.1",
+  "gpt-5.1-codex",
+  "gpt-5.1-codex-mini",
+  "gpt-5.1-codex-mini-high",
+  "gpt-5.1-codex-max",
+  "gpt-5-codex",
+  "gpt-5-codex-mini",
+]);
+
+const OPENAI_PREFERRED_BARE_MODELS = new Set([
+  "gpt-5",
+  "gpt-5-chat-latest",
+  "gpt-5-mini",
+  "gpt-5-nano",
+  "gpt-5-pro",
+  "gpt-5.1-chat-latest",
+  "gpt-5.2-chat-latest",
+  "gpt-5.2-pro",
+  "gpt-5.3-chat-latest",
+]);
+const OPENAI_PREFERRED_BARE_MODEL_PATTERNS = [/^gpt-4(?:\.|o|-|$)/i, /^gpt-3\.5-/i];
+
+function isOpenAIPreferredBareModel(modelId) {
+  return (
+    OPENAI_PREFERRED_BARE_MODELS.has(modelId) ||
+    OPENAI_PREFERRED_BARE_MODEL_PATTERNS.some((pattern) => pattern.test(modelId))
+  );
+}
+
+const ANTHROPIC_PREFERRED_BARE_MODELS = new Set(["claude-opus-4-7"]);
 
 // Reverse index: modelId -> providerIds that expose this model
 const MODEL_TO_PROVIDERS = new Map();
@@ -64,11 +134,22 @@ export function resolveProviderAlias(aliasOrId) {
 /**
  * Resolve provider-specific legacy model alias to canonical model ID.
  */
-function resolveProviderModelAlias(providerOrAlias, modelId) {
+export function resolveProviderModelAlias(providerOrAlias, modelId) {
   if (!modelId || typeof modelId !== "string") return modelId;
   const providerId = resolveProviderAlias(providerOrAlias);
   const aliases = PROVIDER_MODEL_ALIASES[providerId];
   return aliases?.[modelId] || modelId;
+}
+
+function findProviderModelAliasMatches(modelId) {
+  if (!modelId || typeof modelId !== "string") return [];
+
+  return Object.entries(PROVIDER_MODEL_ALIASES)
+    .map(([provider, aliases]) => {
+      const canonicalModel = aliases?.[modelId];
+      return canonicalModel ? { provider, model: canonicalModel } : null;
+    })
+    .filter(Boolean);
 }
 
 /**
@@ -207,10 +288,45 @@ export async function getModelInfoCore(modelStr, aliasesOrGetter) {
   }
 
   const modelId = parsed.model;
+  const providerAliasMatches = findProviderModelAliasMatches(modelId);
+  if (providerAliasMatches.length === 1) {
+    return {
+      provider: providerAliasMatches[0].provider,
+      model: providerAliasMatches[0].model,
+      extendedContext,
+    };
+  }
+  if (providerAliasMatches.length > 1) {
+    const aliasesForHint = providerAliasMatches.map(
+      (match) => PROVIDER_ID_TO_ALIAS[match.provider] || match.provider
+    );
+    const hints = providerAliasMatches
+      .slice(0, 2)
+      .map((match) => `${PROVIDER_ID_TO_ALIAS[match.provider] || match.provider}/${modelId}`);
+    const message = `Ambiguous model alias '${modelId}'. Use provider/model prefix (ex: ${hints.join(" or ")}).`;
+    console.warn(`[MODEL] ${message} Candidates: ${aliasesForHint.join(", ")}`);
+    return {
+      provider: null,
+      model: modelId,
+      errorType: "ambiguous_model_alias",
+      errorMessage: message,
+      candidateProviders: providerAliasMatches.map((match) => match.provider),
+      candidateAliases: aliasesForHint,
+    };
+  }
+
   const providers = MODEL_TO_PROVIDERS.get(modelId) || [];
 
-  // Preserve historical behavior: OpenAI stays default when model exists there
-  if (providers.includes("openai")) {
+  if (providers.includes("codex") && CODEX_PREFERRED_BARE_MODELS.has(modelId)) {
+    return {
+      provider: "codex",
+      model: resolveProviderModelAlias("codex", modelId),
+      extendedContext,
+    };
+  }
+
+  // Preserve historical behavior for classic OpenAI chat model IDs.
+  if (providers.includes("openai") && isOpenAIPreferredBareModel(modelId)) {
     return {
       provider: "openai",
       model: modelId,
@@ -218,15 +334,22 @@ export async function getModelInfoCore(modelStr, aliasesOrGetter) {
     };
   }
 
-  const nonOpenAIProviders = providers.filter((p) => p !== "openai");
-  if (nonOpenAIProviders.length === 1) {
-    const provider = nonOpenAIProviders[0];
+  if (providers.includes("anthropic") && ANTHROPIC_PREFERRED_BARE_MODELS.has(modelId)) {
+    return {
+      provider: "anthropic",
+      model: modelId,
+      extendedContext,
+    };
+  }
+
+  if (providers.length === 1) {
+    const provider = providers[0];
     const canonicalModel = resolveProviderModelAlias(provider, modelId);
     return { provider, model: canonicalModel, extendedContext };
   }
 
-  if (nonOpenAIProviders.length > 1) {
-    const aliasesForHint = nonOpenAIProviders.map((p) => PROVIDER_ID_TO_ALIAS[p] || p);
+  if (providers.length > 1) {
+    const aliasesForHint = providers.map((p) => PROVIDER_ID_TO_ALIAS[p] || p);
     const hints = aliasesForHint.slice(0, 2).map((alias) => `${alias}/${modelId}`);
     const message = `Ambiguous model '${modelId}'. Use provider/model prefix (ex: ${hints.join(" or ")}).`;
     console.warn(`[MODEL] ${message} Candidates: ${aliasesForHint.join(", ")}`);
@@ -235,7 +358,7 @@ export async function getModelInfoCore(modelStr, aliasesOrGetter) {
       model: modelId,
       errorType: "ambiguous_model",
       errorMessage: message,
-      candidateProviders: nonOpenAIProviders,
+      candidateProviders: providers,
       candidateAliases: aliasesForHint,
     };
   }

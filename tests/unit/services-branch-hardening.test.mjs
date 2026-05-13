@@ -314,7 +314,11 @@ test("model helpers cover malformed input, alias maps, wildcard aliases, ambigui
   assert.equal(wildcardAlias.model, "claude-sonnet-4-5-20250929");
   assert.equal(wildcardAlias.wildcardPattern, "claude-sonnet-*");
 
-  const ambiguous = await modelService.getModelInfoCore("gpt-5.2-codex", {});
+  const codexBare = await modelService.getModelInfoCore("gpt-5.2-codex", {});
+  assert.equal(codexBare.provider, "codex");
+  assert.equal(codexBare.model, "gpt-5.2-codex");
+
+  const ambiguous = await modelService.getModelInfoCore("claude-haiku-4.5", {});
   assert.equal(ambiguous.provider, null);
   assert.equal(ambiguous.errorType, "ambiguous_model");
   assert.ok(ambiguous.errorMessage.includes("provider/model"));

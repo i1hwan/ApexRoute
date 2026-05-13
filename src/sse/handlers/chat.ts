@@ -576,15 +576,16 @@ async function handleSingleModelChat(
       comboStrategy,
       isCombo,
       extendedContext,
+      targetFormat,
     });
     if (telemetry) telemetry.endPhase();
 
     const proxyLatency = Date.now() - proxyStartTime;
     const providerAlias = PROVIDER_ID_TO_ALIAS[provider] || provider;
     const effectiveTargetFormat =
+      targetFormat ||
       getModelTargetFormat(providerAlias, model) ||
-      getTargetFormat(provider, credentials.providerSpecificData) ||
-      targetFormat;
+      getTargetFormat(provider, credentials.providerSpecificData);
 
     // 5. Log proxy + translation events
     safeLogEvents({

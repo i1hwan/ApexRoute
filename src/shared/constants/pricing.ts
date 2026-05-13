@@ -4,11 +4,99 @@
 
 // Shared pricing constants to reduce duplication
 const GPT_5_3_CODEX_PRICING = {
+  input: 1.75,
+  output: 14.0,
+  cached: 0.175,
+  reasoning: 14.0,
+};
+
+const GPT_5_5_PRICING = {
   input: 5.0,
-  output: 20.0,
-  cached: 2.5,
+  output: 30.0,
+  cached: 0.5,
   reasoning: 30.0,
-  cache_creation: 5.0,
+  long_context_threshold: 272000,
+  long_context_input_multiplier: 2.0,
+  long_context_output_multiplier: 1.5,
+};
+
+const GPT_5_5_PRO_PRICING = {
+  input: 30.0,
+  output: 180.0,
+  reasoning: 180.0,
+  long_context_threshold: 272000,
+  long_context_input_multiplier: 2.0,
+  long_context_output_multiplier: 1.5,
+};
+
+const GPT_5_4_PRICING = {
+  input: 2.5,
+  output: 15.0,
+  cached: 0.25,
+  reasoning: 15.0,
+  long_context_threshold: 272000,
+  long_context_input_multiplier: 2.0,
+  long_context_output_multiplier: 1.5,
+};
+
+const GPT_5_4_MINI_PRICING = {
+  input: 0.75,
+  output: 4.5,
+  cached: 0.075,
+  reasoning: 4.5,
+};
+
+const GPT_5_4_NANO_PRICING = {
+  input: 0.2,
+  output: 1.25,
+  cached: 0.02,
+  reasoning: 1.25,
+};
+
+const GPT_5_1_CODEX_PRICING = {
+  input: 1.25,
+  output: 10.0,
+  cached: 0.125,
+  reasoning: 10.0,
+};
+
+const GPT_5_CHAT_LATEST_PRICING = {
+  input: 1.25,
+  output: 10.0,
+  reasoning: 10.0,
+};
+
+const GPT_5_1_PRICING = {
+  input: 1.25,
+  output: 10.0,
+  cached: 0.13,
+  reasoning: 10.0,
+};
+
+const GPT_5_MINI_PRICING = {
+  input: 0.25,
+  output: 2.0,
+  cached: 0.025,
+  reasoning: 2.0,
+};
+
+const GPT_5_NANO_PRICING = {
+  input: 0.05,
+  output: 0.4,
+  cached: 0.005,
+  reasoning: 0.4,
+};
+
+const GPT_5_PRO_PRICING = {
+  input: 15.0,
+  output: 120.0,
+  reasoning: 120.0,
+};
+
+const GPT_5_2_PRO_PRICING = {
+  input: 21.0,
+  output: 168.0,
+  reasoning: 168.0,
 };
 
 const CLAUDE_OPUS_4_PRICING = {
@@ -35,6 +123,14 @@ const CLAUDE_OPUS_46_PRICING = {
   cache_creation: 5.0,
 };
 
+const CLAUDE_OPUS_47_PRICING = {
+  input: 5.0,
+  output: 25.0,
+  cached: 0.5,
+  reasoning: 25.0,
+  cache_creation: 6.25,
+};
+
 const CLAUDE_SONNET_46_PRICING = {
   input: 3.0,
   output: 15.0,
@@ -48,6 +144,7 @@ export const DEFAULT_PRICING = {
 
   // Claude Code (cc)
   cc: {
+    "claude-opus-4-7": CLAUDE_OPUS_47_PRICING,
     "claude-opus-4-6": {
       input: 5.0,
       output: 25.0,
@@ -61,13 +158,6 @@ export const DEFAULT_PRICING = {
       cached: 1.5,
       reasoning: 15.0,
       cache_creation: 3.0,
-    },
-    "claude-opus-4-5-20251101": {
-      input: 15.0,
-      output: 75.0,
-      cached: 7.5,
-      reasoning: 75.0,
-      cache_creation: 15.0,
     },
     "claude-sonnet-4-5-20250929": {
       input: 3.0,
@@ -87,99 +177,49 @@ export const DEFAULT_PRICING = {
 
   // OpenAI Codex (cx)
   cx: {
+    // GPT 5.5
+    "gpt-5.5": GPT_5_5_PRICING,
+    "gpt5.5": GPT_5_5_PRICING,
+    "gpt-5.5-pro": GPT_5_5_PRO_PRICING,
+    "gpt5.5-pro": GPT_5_5_PRO_PRICING,
+    "gpt-5.5-xhigh": GPT_5_5_PRICING,
+    "gpt-5.5-high": GPT_5_5_PRICING,
+    "gpt-5.5-medium": GPT_5_5_PRICING,
+    "gpt-5.5-low": GPT_5_5_PRICING,
+    "gpt-5.5-none": GPT_5_5_PRICING,
+
     // GPT 5.4
-    "gpt-5.4": {
-      input: 5.0,
-      output: 20.0,
-      cached: 2.5,
-      reasoning: 30.0,
-      cache_creation: 5.0,
-    },
-    "gpt5.4": {
-      input: 5.0,
-      output: 20.0,
-      cached: 2.5,
-      reasoning: 30.0,
-      cache_creation: 5.0,
-    },
+    "gpt-5.4": GPT_5_4_PRICING,
+    "gpt5.4": GPT_5_4_PRICING,
+    "gpt-5.4-pro": GPT_5_5_PRO_PRICING,
+    "gpt5.4-pro": GPT_5_5_PRO_PRICING,
     // T12: fallback pricing for gpt-5.4 mini variants
-    "gpt-5.4-mini": {
-      input: 1.5,
-      output: 6.0,
-      cached: 0.75,
-      reasoning: 9.0,
-      cache_creation: 1.5,
-    },
-    "gpt5.4-mini": {
-      input: 1.5,
-      output: 6.0,
-      cached: 0.75,
-      reasoning: 9.0,
-      cache_creation: 1.5,
-    },
+    "gpt-5.4-mini": GPT_5_4_MINI_PRICING,
+    "gpt5.4-mini": GPT_5_4_MINI_PRICING,
+    "gpt-5.4-nano": GPT_5_4_NANO_PRICING,
+    "gpt5.4-nano": GPT_5_4_NANO_PRICING,
     // GPT 5.3 Codex family (all same pricing tier)
     "gpt-5.3-codex": GPT_5_3_CODEX_PRICING,
     "gpt-5.3-codex-xhigh": GPT_5_3_CODEX_PRICING,
     "gpt-5.3-codex-high": GPT_5_3_CODEX_PRICING,
+    "gpt-5.3-codex-medium": GPT_5_3_CODEX_PRICING,
     "gpt-5.3-codex-low": GPT_5_3_CODEX_PRICING,
     "gpt-5.3-codex-none": GPT_5_3_CODEX_PRICING,
-    "gpt-5.1-codex-mini-high": {
-      input: 1.5,
-      output: 6.0,
-      cached: 0.75,
-      reasoning: 9.0,
-      cache_creation: 1.5,
-    },
-    "gpt-5.2-codex": {
-      input: 5.0,
-      output: 20.0,
-      cached: 2.5,
-      reasoning: 30.0,
-      cache_creation: 5.0,
-    },
+    "gpt-5.3-codex-spark": GPT_5_3_CODEX_PRICING,
+    "gpt-5.3-codex-spark-xhigh": GPT_5_3_CODEX_PRICING,
+    "gpt-5.3-codex-spark-high": GPT_5_3_CODEX_PRICING,
+    "gpt-5.3-codex-spark-medium": GPT_5_3_CODEX_PRICING,
+    "gpt-5.3-codex-spark-low": GPT_5_3_CODEX_PRICING,
+    "gpt-5.3-codex-spark-none": GPT_5_3_CODEX_PRICING,
+    "gpt-5.1-codex-mini-high": GPT_5_MINI_PRICING,
+    "gpt-5.2-codex": GPT_5_3_CODEX_PRICING,
 
-    "gpt-5.2": {
-      input: 5.0,
-      output: 20.0,
-      cached: 2.5,
-      reasoning: 30.0,
-      cache_creation: 5.0,
-    },
-    "gpt-5.1-codex-max": {
-      input: 8.0,
-      output: 32.0,
-      cached: 4.0,
-      reasoning: 48.0,
-      cache_creation: 8.0,
-    },
-    "gpt-5.1-codex": {
-      input: 4.0,
-      output: 16.0,
-      cached: 2.0,
-      reasoning: 24.0,
-      cache_creation: 4.0,
-    },
-    "gpt-5.1-codex-mini": {
-      input: 1.5,
-      output: 6.0,
-      cached: 0.75,
-      reasoning: 9.0,
-      cache_creation: 1.5,
-    },
-    "gpt-5.1": {
-      input: 4.0,
-      output: 16.0,
-      cached: 2.0,
-      reasoning: 24.0,
-      cache_creation: 4.0,
-    },
-    "gpt-5-codex": {
-      input: 3.0,
-      output: 12.0,
-      cached: 1.5,
-      reasoning: 18.0,
-      cache_creation: 3.0,
-    },
+    "gpt-5.2": GPT_5_3_CODEX_PRICING,
+    "gpt-5.1-codex-max": GPT_5_1_CODEX_PRICING,
+    "gpt-5.1-codex": GPT_5_1_CODEX_PRICING,
+    "gpt-5.1-codex-mini": GPT_5_MINI_PRICING,
+    "gpt-5.1": GPT_5_1_PRICING,
+    "gpt-5-codex": GPT_5_1_CODEX_PRICING,
     "gpt-5-codex-mini": {
       input: 1.0,
       output: 4.0,
@@ -456,13 +496,6 @@ export const DEFAULT_PRICING = {
       reasoning: 22.5,
       cache_creation: 3.0,
     },
-    "claude-4.5-opus": {
-      input: 5.0,
-      output: 25.0,
-      cached: 0.5,
-      reasoning: 37.5,
-      cache_creation: 5.0,
-    },
     "claude-4.5-haiku": {
       input: 0.5,
       output: 2.5,
@@ -504,6 +537,40 @@ export const DEFAULT_PRICING = {
 
   // OpenAI
   openai: {
+    "gpt-5.5": GPT_5_5_PRICING,
+    "gpt-5.5-pro": GPT_5_5_PRO_PRICING,
+    "gpt-5.4": GPT_5_4_PRICING,
+    "gpt-5.4-pro": GPT_5_5_PRO_PRICING,
+    "gpt-5.4-mini": GPT_5_4_MINI_PRICING,
+    "gpt-5.4-nano": GPT_5_4_NANO_PRICING,
+    "gpt-5.3-codex": GPT_5_3_CODEX_PRICING,
+    "gpt-5.3-codex-xhigh": GPT_5_3_CODEX_PRICING,
+    "gpt-5.3-codex-high": GPT_5_3_CODEX_PRICING,
+    "gpt-5.3-codex-medium": GPT_5_3_CODEX_PRICING,
+    "gpt-5.3-codex-low": GPT_5_3_CODEX_PRICING,
+    "gpt-5.3-codex-none": GPT_5_3_CODEX_PRICING,
+    "gpt-5.3-codex-spark": GPT_5_3_CODEX_PRICING,
+    "gpt-5.3-codex-spark-xhigh": GPT_5_3_CODEX_PRICING,
+    "gpt-5.3-codex-spark-high": GPT_5_3_CODEX_PRICING,
+    "gpt-5.3-codex-spark-medium": GPT_5_3_CODEX_PRICING,
+    "gpt-5.3-codex-spark-low": GPT_5_3_CODEX_PRICING,
+    "gpt-5.3-codex-spark-none": GPT_5_3_CODEX_PRICING,
+    "gpt-5.2": GPT_5_3_CODEX_PRICING,
+    "gpt-5.2-chat-latest": GPT_5_3_CODEX_PRICING,
+    "gpt-5.2-codex": GPT_5_3_CODEX_PRICING,
+    "gpt-5.2-pro": GPT_5_2_PRO_PRICING,
+    "gpt-5.3-chat-latest": GPT_5_3_CODEX_PRICING,
+    "gpt-5.1": GPT_5_1_PRICING,
+    "gpt-5.1-chat-latest": GPT_5_1_CODEX_PRICING,
+    "gpt-5.1-codex": GPT_5_1_CODEX_PRICING,
+    "gpt-5.1-codex-mini": GPT_5_MINI_PRICING,
+    "gpt-5.1-codex-max": GPT_5_1_CODEX_PRICING,
+    "gpt-5": GPT_5_1_CODEX_PRICING,
+    "gpt-5-chat-latest": GPT_5_CHAT_LATEST_PRICING,
+    "gpt-5-codex": GPT_5_1_CODEX_PRICING,
+    "gpt-5-mini": GPT_5_MINI_PRICING,
+    "gpt-5-nano": GPT_5_NANO_PRICING,
+    "gpt-5-pro": GPT_5_PRO_PRICING,
     "gpt-4o": {
       input: 2.5,
       output: 10.0,
@@ -612,9 +679,9 @@ export const DEFAULT_PRICING = {
     // Common model IDs (without dates) used across providers
     // Intentional duplicates of dot-notation variants (e.g. claude-opus-4.6)
     // to cover hyphen-notation IDs (claude-opus-4-6) used by some clients
+    "claude-opus-4-7": CLAUDE_OPUS_47_PRICING,
     "claude-opus-4-6": CLAUDE_OPUS_46_PRICING,
     "claude-sonnet-4-6": CLAUDE_SONNET_46_PRICING,
-    "claude-opus-4-5-20251101": CLAUDE_OPUS_4_PRICING,
     "claude-sonnet-4-5-20250929": CLAUDE_SONNET_4_PRICING,
     "claude-sonnet-4": CLAUDE_SONNET_4_PRICING,
     "claude-opus-4": CLAUDE_OPUS_4_PRICING,

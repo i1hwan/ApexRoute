@@ -2,12 +2,14 @@ import { BaseExecutor } from "./base.ts";
 import { PROVIDERS, OAUTH_ENDPOINTS } from "../config/constants.ts";
 import { getAccessToken } from "../services/tokenRefresh.ts";
 import { getRotatingApiKey } from "../services/apiKeyRotator.ts";
+import { getModelTargetFormat } from "../config/providerModels.ts";
 import {
   buildClaudeCodeCompatibleHeaders,
   CLAUDE_CODE_COMPATIBLE_DEFAULT_CHAT_PATH,
   joinClaudeCodeCompatibleUrl,
 } from "../services/claudeCodeCompatible.ts";
 import { getOpenAICompatibleType, isClaudeCodeCompatible } from "../services/provider.ts";
+import { FORMATS } from "../translator/formats.ts";
 
 export class DefaultExecutor extends BaseExecutor {
   constructor(provider) {
@@ -56,6 +58,15 @@ export class DefaultExecutor extends BaseExecutor {
         const resourceUrl = credentials?.providerSpecificData?.resourceUrl;
         return `https://${resourceUrl || "portal.qwen.ai"}/v1/chat/completions`;
       }
+      case "openai":
+        if (getModelTargetFormat("openai", model) === FORMATS.OPENAI_RESPONSES) {
+          return (
+            this.config.responsesBaseUrl ||
+            this.config.baseUrl?.replace(/\/chat\/completions\/?$/, "/responses") ||
+            "https://api.openai.com/v1/responses"
+          );
+        }
+        return this.config.baseUrl;
       default:
         return this.config.baseUrl;
     }
