@@ -15,6 +15,7 @@ import { getTokenLimit } from "./contextManager.ts";
 import { parseModel } from "./model.ts";
 import { CONTEXT_OVERFLOW_REGEX } from "./errorClassifier.ts";
 import {
+  getProviderModels,
   getModelTargetFormat,
   isValidModel,
   PROVIDER_ID_TO_ALIAS,
@@ -268,6 +269,19 @@ function resolveFallbackProviderKey(provider?: string | null): string | null {
   return providerKey;
 }
 
+function isDynamicCompatibleProvider(provider?: string | null): boolean {
+  const providerKey = resolveProviderKey(provider);
+  return (
+    typeof providerKey === "string" &&
+    (providerKey.startsWith("openai-compatible-") ||
+      providerKey.startsWith("anthropic-compatible-"))
+  );
+}
+
+function hasStaticProviderRegistry(provider: string): boolean {
+  return getProviderModels(provider).length > 0;
+}
+
 function isCodexProvider(providerHint?: string | null): boolean {
   const provider = resolveProviderKey(providerHint);
   return provider === "cx" || provider === "codex";
@@ -312,9 +326,20 @@ function isFallbackCandidateAvailable(
   const modelId = parsed.model || candidate;
   if (!provider || !modelId) return false;
 
-  return (
-    isValidModel(provider, modelId) && targetFormatMatches(provider, modelId, targetFormatHint)
-  );
+  const dynamicCompatible = isDynamicCompatibleProvider(providerHint);
+  const isKnownModel = isValidModel(provider, modelId);
+  if (isKnownModel) {
+    if (dynamicCompatible) {
+      const knownTargetFormat = getModelTargetFormat(provider, modelId);
+      return !knownTargetFormat || !targetFormatHint || knownTargetFormat === targetFormatHint;
+    }
+    return targetFormatMatches(provider, modelId, targetFormatHint);
+  }
+
+  if (!dynamicCompatible || !hasStaticProviderRegistry(provider)) return false;
+
+  // Dynamic compatible providers may expose custom models outside ApexRoute's static registry.
+  return true;
 }
 
 /**

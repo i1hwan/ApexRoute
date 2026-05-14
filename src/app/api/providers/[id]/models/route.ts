@@ -37,6 +37,7 @@ function getProviderModelsPath(providerSpecificData: unknown): string | null {
   } catch {
     return null;
   }
+  if (/[\u0000-\u001F\u007F]/.test(decodedPathOnly)) return null;
   if (pathOnly.split("/").includes("..") || decodedPathOnly.split("/").includes("..")) {
     return null;
   }
