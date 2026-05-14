@@ -108,6 +108,14 @@ test("T30: GPT 5.x Codex family fallback covers current GPT 5.5, 5.4, and Spark 
     getNextFamilyFallback("gpt-5-codex", new Set(["gpt-5.1-codex"]), "openai"),
     "gpt-5.2-codex"
   );
+  assert.equal(
+    getNextFamilyFallback("claude-opus-4-7", new Set(), "claude", "claude"),
+    "claude-opus-4-6"
+  );
+  assert.equal(
+    getNextFamilyFallback("claude-opus-4-7", new Set(), "claude", "openai-responses"),
+    null
+  );
 
   const sparkFamily = getModelFamily("gpt-5.3-codex-spark");
   assert.ok(sparkFamily.includes("gpt-5.3-codex"));

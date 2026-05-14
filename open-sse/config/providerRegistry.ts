@@ -111,9 +111,18 @@ const GPT_5_OPENAI_5_PRO_CAPABILITIES = {
 } as const;
 
 const GPT_5_OPENAI_CHAT_LATEST_CAPABILITIES = {
-  ...GPT_5_OPENAI_CHAT_CAPABILITIES,
+  toolCalling: true,
+  supportsReasoning: true,
+  supportsVision: true,
+  supportsXHighEffort: true,
   contextLength: GPT_5_CHAT_LATEST_CONTEXT_LENGTH,
   maxOutputTokens: GPT_5_CHAT_LATEST_MAX_OUTPUT_TOKENS,
+} as const;
+
+const GPT_5_3_OPENAI_CHAT_LATEST_CAPABILITIES = {
+  ...GPT_5_OPENAI_CHAT_LATEST_CAPABILITIES,
+  supportsReasoning: false,
+  supportsXHighEffort: false,
 } as const;
 
 const GPT_5_CODEX_CAPABILITIES = {
@@ -662,7 +671,7 @@ export const REGISTRY: Record<string, RegistryEntry> = {
       {
         id: "gpt-5.3-chat-latest",
         name: "GPT-5.3 Chat Latest",
-        ...GPT_5_OPENAI_CHAT_LATEST_CAPABILITIES,
+        ...GPT_5_3_OPENAI_CHAT_LATEST_CAPABILITIES,
       },
       {
         id: "gpt-5.3-codex-spark",

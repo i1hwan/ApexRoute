@@ -286,7 +286,7 @@ function targetFormatMatches(
   if (!targetFormatHint) return true;
   const candidateTargetFormat = getModelTargetFormat(provider, modelId);
   if (candidateTargetFormat) return candidateTargetFormat === targetFormatHint;
-  return targetFormatHint === "openai";
+  return targetFormatHint !== "openai-responses";
 }
 
 function isFallbackCandidateAvailable(

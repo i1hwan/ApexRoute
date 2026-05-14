@@ -308,7 +308,8 @@ export async function getModelInfoCore(modelStr, aliasesOrGetter) {
     return {
       provider: null,
       model: modelId,
-      errorType: "ambiguous_model_alias",
+      errorType: "ambiguous_model",
+      errorSubType: "ambiguous_model_alias",
       errorMessage: message,
       candidateProviders: providerAliasMatches.map((match) => match.provider),
       candidateAliases: aliasesForHint,

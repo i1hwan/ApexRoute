@@ -479,7 +479,11 @@ async function validateBailianCodingPlanProvider({ apiKey, providerSpecificData 
   }
 }
 
-async function validateOpenAICompatibleProvider({ apiKey, providerSpecificData = {} }: any) {
+async function validateOpenAICompatibleProvider({
+  provider,
+  apiKey,
+  providerSpecificData = {},
+}: any) {
   const baseUrl = normalizeBaseUrl(providerSpecificData.baseUrl);
   if (!baseUrl) {
     return { valid: false, error: "No base URL configured for OpenAI compatible provider" };
@@ -532,7 +536,7 @@ async function validateOpenAICompatibleProvider({ apiKey, providerSpecificData =
 
   // Step 2: Fallback — try a minimal chat completion request
   // Many providers don't expose /models but accept chat completions fine
-  const apiType = providerSpecificData.apiType === "responses" ? "responses" : "chat";
+  const apiType = getOpenAICompatibleType(provider, providerSpecificData);
   const chatUrl = buildOpenAICompatibleUrl(baseUrl, apiType, providerSpecificData);
   const testModelId = validationModelId;
 
@@ -837,7 +841,7 @@ export async function validateProviderApiKey({ provider, apiKey, providerSpecifi
 
   if (isOpenAICompatibleProvider(provider)) {
     try {
-      return await validateOpenAICompatibleProvider({ apiKey, providerSpecificData });
+      return await validateOpenAICompatibleProvider({ provider, apiKey, providerSpecificData });
     } catch (error: any) {
       return { valid: false, error: error.message || "Validation failed", unsupported: false };
     }

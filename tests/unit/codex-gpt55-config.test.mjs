@@ -148,7 +148,7 @@ test("OpenAI registry exposes current GPT 5.x API-key catalog entries", () => {
   ]) {
     const model = byId.get(id);
     assert.ok(model, `missing OpenAI registry model: ${id}`);
-    assert.equal(model.supportsReasoning, true);
+    assert.equal(model.supportsReasoning, id !== "gpt-5.3-chat-latest");
     assert.equal(model.supportsVision, true);
     assert.equal(model.toolCalling, true);
     const expectedTargetFormat = id.includes("codex") ? "openai-responses" : null;
@@ -161,6 +161,8 @@ test("OpenAI registry exposes current GPT 5.x API-key catalog entries", () => {
   assert.equal(byId.get("gpt-5.3-codex-spark").maxOutputTokens, 32000);
   assert.equal(byId.get("gpt-5.3-chat-latest").contextLength, 128000);
   assert.equal(byId.get("gpt-5.3-chat-latest").maxOutputTokens, 16384);
+  assert.equal(byId.get("gpt-5-chat-latest").contextLength, 400000);
+  assert.equal(byId.get("gpt-5-chat-latest").maxOutputTokens, 128000);
   assert.equal(byId.get("gpt-5-pro").contextLength, 400000);
   assert.equal(byId.get("gpt-5-pro").maxOutputTokens, 272000);
   assert.equal(byId.get("gpt-5.2-pro").contextLength, 400000);

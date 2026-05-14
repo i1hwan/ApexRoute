@@ -443,6 +443,16 @@ function getModelSpecLookupIds(modelId: string): string[] {
   return [...new Set(ids)];
 }
 
+const MODEL_SPEC_ENTRIES = Object.entries(MODEL_SPECS).filter(
+  ([canonical]) => canonical !== "__default__"
+);
+
+// Prefix matching checks longer keys first so specific IDs like
+// gpt-5.3-codex-spark are not swallowed by gpt-5.3-codex.
+const MODEL_SPEC_ENTRIES_BY_LONGEST_PREFIX = [...MODEL_SPEC_ENTRIES].sort(
+  ([left], [right]) => right.length - left.length
+);
+
 export function getModelSpec(modelId: string): ModelSpec | undefined {
   const lookupIds = getModelSpecLookupIds(modelId);
 
@@ -451,19 +461,13 @@ export function getModelSpec(modelId: string): ModelSpec | undefined {
   }
 
   // Buscas por alias
-  for (const [canonical, spec] of Object.entries(MODEL_SPECS)) {
-    if (canonical === "__default__") continue;
+  for (const [, spec] of MODEL_SPEC_ENTRIES) {
     if (lookupIds.some((lookupId) => spec.aliases?.includes(lookupId))) return spec;
   }
 
-  // Prefix matching. Check longer keys first so specific IDs like
-  // gpt-5.3-codex-spark are not swallowed by gpt-5.3-codex.
-  const specsByLongestPrefix = Object.entries(MODEL_SPECS).sort(
-    ([left], [right]) => right.length - left.length
-  );
   for (const lookupId of lookupIds) {
-    for (const [key, spec] of specsByLongestPrefix) {
-      if (key !== "__default__" && lookupId.startsWith(key)) return spec;
+    for (const [key, spec] of MODEL_SPEC_ENTRIES_BY_LONGEST_PREFIX) {
+      if (lookupId.startsWith(key)) return spec;
     }
   }
 
@@ -487,7 +491,7 @@ export function capThinkingBudget(modelId: string, budget: number): number {
 
 export function resolveModelAlias(modelId: string): string {
   const lookupIds = getModelSpecLookupIds(modelId);
-  for (const [canonical, spec] of Object.entries(MODEL_SPECS)) {
+  for (const [canonical, spec] of MODEL_SPEC_ENTRIES) {
     if (spec.aliases?.some((alias) => lookupIds.includes(alias))) return canonical;
   }
   return modelId;
