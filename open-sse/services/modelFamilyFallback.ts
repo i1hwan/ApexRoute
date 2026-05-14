@@ -259,6 +259,15 @@ function resolveProviderKey(provider?: string | null): string | null {
   return PROVIDER_ID_TO_ALIAS[provider] || provider;
 }
 
+function resolveFallbackProviderKey(provider?: string | null): string | null {
+  const providerKey = resolveProviderKey(provider);
+  if (!providerKey) return null;
+  if (providerKey.startsWith("openai-compatible-")) return "openai";
+  if (providerKey.startsWith("anthropic-compatible-cc-")) return "cc";
+  if (providerKey.startsWith("anthropic-compatible-")) return "anthropic";
+  return providerKey;
+}
+
 function isCodexProvider(providerHint?: string | null): boolean {
   const provider = resolveProviderKey(providerHint);
   return provider === "cx" || provider === "codex";
@@ -297,7 +306,9 @@ function isFallbackCandidateAvailable(
   if (!providerHint) return true;
 
   const parsed = parseModel(candidate);
-  const provider = resolveProviderKey(parsed.provider || parsed.providerAlias || providerHint);
+  const provider = resolveFallbackProviderKey(
+    parsed.provider || parsed.providerAlias || providerHint
+  );
   const modelId = parsed.model || candidate;
   if (!provider || !modelId) return false;
 

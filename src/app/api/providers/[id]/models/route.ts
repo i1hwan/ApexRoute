@@ -27,7 +27,20 @@ function getProviderModelsPath(providerSpecificData: unknown): string | null {
   const modelsPath = data.modelsPath;
   if (typeof modelsPath !== "string") return null;
   const trimmed = modelsPath.trim();
-  return trimmed.startsWith("/") ? trimmed : null;
+  if (!trimmed.startsWith("/")) return null;
+  if (trimmed.length > 512) return null;
+  if (/[\u0000-\u001F\u007F]/.test(trimmed)) return null;
+  const pathOnly = trimmed.split(/[?#]/)[0];
+  let decodedPathOnly = pathOnly;
+  try {
+    decodedPathOnly = decodeURIComponent(pathOnly);
+  } catch {
+    return null;
+  }
+  if (pathOnly.split("/").includes("..") || decodedPathOnly.split("/").includes("..")) {
+    return null;
+  }
+  return trimmed;
 }
 
 function joinUrlPath(baseUrl: string, path: string): string {
