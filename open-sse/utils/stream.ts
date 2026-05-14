@@ -21,6 +21,7 @@ import {
   createStructuredSSECollector,
   buildStreamSummaryFromEvents,
 } from "./streamPayloadCollector.ts";
+import { dumpRawProviderChunk, isRawProviderDumpEnabled } from "./rawProviderByteDump.ts";
 import { STREAM_IDLE_TIMEOUT_MS, HTTP_STATUS } from "../config/constants.ts";
 import {
   sanitizeStreamingChunk,
@@ -261,6 +262,9 @@ export function createSSEStream(options: StreamOptions = {}) {
       transform(chunk, controller) {
         if (streamTimedOut) return;
         lastChunkTime = Date.now();
+        if (isRawProviderDumpEnabled()) {
+          dumpRawProviderChunk(chunk as Uint8Array, { provider, connectionId });
+        }
         const text = decoder.decode(chunk, { stream: true });
         buffer += text;
         reqLogger?.appendProviderChunk?.(text);
