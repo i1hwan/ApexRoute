@@ -221,6 +221,69 @@ test("provider models route rejects encoded traversal in OpenAI-compatible model
   assert.equal(body.source, "api");
 });
 
+test("provider models route ignores literal control characters in OpenAI-compatible modelsPath", async () => {
+  const connection = await seedConnection("openai-compatible-control-models-path", {
+    apiKey: "sk-openai-compatible",
+    providerSpecificData: {
+      baseUrl: "https://proxy.example.com/v1",
+      modelsPath: "/safe/\u0000/admin",
+    },
+  });
+  const seenUrls = [];
+
+  globalThis.fetch = async (url) => {
+    const urlString = String(url);
+    seenUrls.push(urlString);
+    if (urlString === "https://proxy.example.com/v1/models") {
+      return Response.json({
+        data: [{ id: "safe-model", name: "Safe Model" }],
+      });
+    }
+    return new Response("unexpected endpoint", { status: 404 });
+  };
+
+  const response = await callRoute(connection.id);
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(seenUrls.includes("https://proxy.example.com/v1/safe/\u0000/admin"), false);
+  assert.ok(seenUrls.includes("https://proxy.example.com/v1/models"));
+  assert.deepEqual(body.models, [{ id: "safe-model", name: "Safe Model" }]);
+  assert.equal(body.source, "api");
+});
+
+test("provider models route ignores overlong OpenAI-compatible modelsPath", async () => {
+  const longPath = `/${"a".repeat(513)}`;
+  const connection = await seedConnection("openai-compatible-long-models-path", {
+    apiKey: "sk-openai-compatible",
+    providerSpecificData: {
+      baseUrl: "https://proxy.example.com/v1",
+      modelsPath: longPath,
+    },
+  });
+  const seenUrls = [];
+
+  globalThis.fetch = async (url) => {
+    const urlString = String(url);
+    seenUrls.push(urlString);
+    if (urlString === "https://proxy.example.com/v1/models") {
+      return Response.json({
+        data: [{ id: "safe-model", name: "Safe Model" }],
+      });
+    }
+    return new Response("unexpected endpoint", { status: 404 });
+  };
+
+  const response = await callRoute(connection.id);
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(seenUrls.includes(`https://proxy.example.com/v1${longPath}`), false);
+  assert.ok(seenUrls.includes("https://proxy.example.com/v1/models"));
+  assert.deepEqual(body.models, [{ id: "safe-model", name: "Safe Model" }]);
+  assert.equal(body.source, "api");
+});
+
 test("provider models route keeps OpenAI-compatible API source even when owned_by matches provider", async () => {
   const connection = await seedConnection("openai-compatible-custom-path", {
     apiKey: "sk-openai-compatible",
