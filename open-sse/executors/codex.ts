@@ -1,7 +1,24 @@
-import { BaseExecutor } from "./base.ts";
+import { BaseExecutor, setUserAgentHeader, type ProviderCredentials } from "./base.ts";
+import { getCodexDefaultHeaders } from "../config/codexClient.ts";
 import { CODEX_DEFAULT_INSTRUCTIONS } from "../config/codexInstructions.ts";
 import { PROVIDERS } from "../config/constants.ts";
 import { refreshCodexToken } from "../services/tokenRefresh.ts";
+
+const CODEX_CANONICAL_HEADER_NAMES = [
+  "Version",
+  "Openai-Beta",
+  "X-Codex-Beta-Features",
+  "User-Agent",
+];
+
+function deleteHeadersCaseInsensitive(headers: Record<string, string>, names: string[]): void {
+  const lowerNames = new Set(names.map((name) => name.toLowerCase()));
+  for (const key of Object.keys(headers)) {
+    if (lowerNames.has(key.toLowerCase())) {
+      delete headers[key];
+    }
+  }
+}
 
 // ─── T09: Codex vs Spark Scope-Aware Rate Limiting ────────────────────────
 // Codex has two independent quota pools: "codex" (standard) and "spark" (premium).
@@ -299,7 +316,8 @@ const MAX_EFFORT_BY_MODEL: Record<string, EffortLevel> = {
   "gpt-5.2-codex": "xhigh",
   "gpt-5.1-codex-max": "xhigh",
   "gpt-5-mini": "high",
-  "gpt-5.1-mini": "high",
+  "gpt-5.1-codex-mini": "high",
+  "gpt-5.1-codex-mini-high": "high",
   "gpt-4.1-mini": "high",
 };
 
@@ -354,6 +372,8 @@ export class CodexExecutor extends BaseExecutor {
     const isCompactRequest = isCompactResponsesEndpoint(credentials?.requestEndpointPath);
     const headers = super.buildHeaders(credentials, isCompactRequest ? false : true);
 
+    this.finalizeHeaders(headers, credentials, stream);
+
     // Add workspace binding header if workspaceId is persisted
     const workspaceId = credentials?.providerSpecificData?.workspaceId;
     if (workspaceId) {
@@ -361,6 +381,19 @@ export class CodexExecutor extends BaseExecutor {
     }
 
     return headers;
+  }
+
+  override finalizeHeaders(
+    headers: Record<string, string>,
+    credentials: ProviderCredentials,
+    stream = true
+  ): void {
+    void credentials;
+    void stream;
+    const codexHeaders = getCodexDefaultHeaders();
+    deleteHeadersCaseInsensitive(headers, CODEX_CANONICAL_HEADER_NAMES);
+    Object.assign(headers, codexHeaders);
+    setUserAgentHeader(headers, codexHeaders["User-Agent"]);
   }
 
   /**

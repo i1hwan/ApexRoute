@@ -81,11 +81,13 @@ test("model capability helpers cover denylist, empty input and default-safe path
   assert.equal(modelCapabilities.supportsToolCalling(""), false);
   assert.equal(modelCapabilities.supportsToolCalling("openai/gpt-oss-120b"), false);
   assert.equal(modelCapabilities.supportsToolCalling("deepseek-reasoner"), false);
+  assert.equal(modelCapabilities.supportsToolCalling("google/gemini-3.1-flash-image"), false);
   assert.equal(modelCapabilities.supportsToolCalling("openai/gpt-4o"), true);
 
   assert.equal(modelCapabilities.supportsReasoning(""), true);
   assert.equal(modelCapabilities.supportsReasoning("antigravity/claude-sonnet-4-6"), false);
   assert.equal(modelCapabilities.supportsReasoning("antigravity/claude-sonnet-4"), false);
+  assert.equal(modelCapabilities.supportsReasoning("gpt-5.3-chat-latest"), false);
   assert.equal(modelCapabilities.supportsReasoning("openai/gpt-4o"), true);
 });
 
@@ -314,7 +316,11 @@ test("model helpers cover malformed input, alias maps, wildcard aliases, ambigui
   assert.equal(wildcardAlias.model, "claude-sonnet-4-5-20250929");
   assert.equal(wildcardAlias.wildcardPattern, "claude-sonnet-*");
 
-  const ambiguous = await modelService.getModelInfoCore("gpt-5.2-codex", {});
+  const codexBare = await modelService.getModelInfoCore("gpt-5.2-codex", {});
+  assert.equal(codexBare.provider, "codex");
+  assert.equal(codexBare.model, "gpt-5.2-codex");
+
+  const ambiguous = await modelService.getModelInfoCore("claude-haiku-4.5", {});
   assert.equal(ambiguous.provider, null);
   assert.equal(ambiguous.errorType, "ambiguous_model");
   assert.ok(ambiguous.errorMessage.includes("provider/model"));

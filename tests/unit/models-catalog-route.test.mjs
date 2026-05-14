@@ -15,6 +15,7 @@ const combosDb = await import("../../src/lib/db/combos.ts");
 const settingsDb = await import("../../src/lib/db/settings.ts");
 const apiKeysDb = await import("../../src/lib/db/apiKeys.ts");
 const v1ModelsCatalog = await import("../../src/app/api/v1/models/catalog.ts");
+const v1BetaModelsRoute = await import("../../src/app/api/v1beta/models/route.ts");
 
 async function resetStorage() {
   core.resetDbInstance();
@@ -44,6 +45,24 @@ test.after(async () => {
   core.resetDbInstance();
   apiKeysDb.resetApiKeyState();
   fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
+});
+
+test("v1beta models list uses registry token caps for built-in models", async () => {
+  const response = await v1BetaModelsRoute.GET();
+  const body = await response.json();
+  const byName = new Map(body.models.map((model) => [model.name, model]));
+
+  const codexSpark = byName.get("models/cx/gpt-5.3-codex-spark");
+  assert.equal(codexSpark.inputTokenLimit, 128000);
+  assert.equal(codexSpark.outputTokenLimit, 32000);
+
+  const codexGpt55 = byName.get("models/cx/gpt-5.5");
+  assert.equal(codexGpt55.inputTokenLimit, 400000);
+  assert.equal(codexGpt55.outputTokenLimit, 128000);
+
+  const openaiGpt55 = byName.get("models/openai/gpt-5.5");
+  assert.equal(openaiGpt55.inputTokenLimit, 1050000);
+  assert.equal(openaiGpt55.outputTokenLimit, 128000);
 });
 
 test("v1 models catalog requires auth when the route is protected and login is enabled", async () => {
@@ -139,6 +158,36 @@ test("v1 models catalog includes combos and custom models while excluding hidden
     [...ids].some((id) => id.startsWith("claude/") || id.startsWith("cc/")),
     false
   );
+});
+
+test("v1 models catalog exposes current OpenAI GPT 5.x static models", async () => {
+  await seedConnection("openai", { name: "openai-gpt5" });
+
+  const response = await v1ModelsCatalog.getUnifiedModelsResponse(
+    new Request("http://localhost/api/v1/models")
+  );
+  const body = await response.json();
+  const byId = new Map(body.data.map((item) => [item.id, item]));
+
+  assert.equal(response.status, 200);
+  assert.equal(byId.get("openai/gpt-5.5")?.context_length, 1050000);
+  assert.equal(byId.get("openai/gpt-5.5")?.max_output_tokens, 128000);
+  assert.equal(byId.get("openai/gpt-5.5")?.capabilities?.reasoning, true);
+  assert.equal(byId.get("openai/gpt-5.5")?.capabilities?.tools, true);
+  assert.deepEqual(byId.get("openai/gpt-5.5")?.supported_reasoning_efforts, [
+    "none",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+  ]);
+  assert.equal(byId.get("openai/gpt-5.4-pro")?.context_length, 1050000);
+  assert.equal(byId.get("openai/gpt-5.3-codex-spark")?.context_length, 128000);
+  assert.equal(byId.get("openai/gpt-5.3-codex-spark")?.max_output_tokens, 32000);
+  assert.equal(byId.get("openai/gpt-5.3-codex-spark")?.api_format, "responses");
+  assert.equal(byId.get("openai/gpt-5.3-codex-spark")?.target_format, "openai-responses");
+  assert.equal(byId.get("openai/gpt-5.1-codex")?.context_length, 400000);
+  assert.equal(byId.get("openai/gpt-5-codex")?.context_length, 400000);
 });
 
 test("v1 models catalog keeps only visible combos when no providers are active", async () => {
@@ -396,6 +445,8 @@ test("v1 models catalog exposes provider-prefixed custom models, filters by raw 
         apiFormat: "responses",
         supportedEndpoints: ["images"],
         inputTokenLimit: 1234,
+        outputTokenLimit: 5678,
+        supportsThinking: true,
       },
       {
         id: "hidden-custom",
@@ -434,7 +485,13 @@ test("v1 models catalog exposes provider-prefixed custom models, filters by raw 
   assert.equal(shortAlias.api_format, "responses");
   assert.deepEqual(shortAlias.supported_endpoints, ["images"]);
   assert.equal(shortAlias.context_length, 1234);
+  assert.equal(shortAlias.max_output_tokens, 5678);
+  assert.equal(shortAlias.capabilities?.reasoning, true);
+  assert.equal(shortAlias.capabilities?.thinking, true);
   assert.equal(providerAlias.parent, "cl/demo-custom");
+  assert.equal(providerAlias.api_format, "responses");
+  assert.deepEqual(providerAlias.supported_endpoints, ["images"]);
+  assert.equal(providerAlias.max_output_tokens, 5678);
 });
 
 test("v1 models catalog returns 500 when model compatibility lookup crashes", async () => {
@@ -540,8 +597,14 @@ test("v1 models catalog adds managed fallback models for Claude-compatible provi
   );
   const body = await response.json();
   const ids = new Set(body.data.map((item) => item.id));
+  const opus47 = body.data.find((item) => item.id === "ccdemo/claude-opus-4-7");
 
   assert.equal(response.status, 200);
   assert.ok(ids.has("ccdemo/claude-opus-4-6"));
+  assert.ok(opus47);
+  assert.equal(opus47.context_length, 1000000);
+  assert.equal(opus47.max_output_tokens, 128000);
+  assert.equal(opus47.capabilities?.thinking, true);
+  assert.ok(opus47.supported_reasoning_efforts.includes("xhigh"));
   assert.equal(ids.has("ccdemo/claude-sonnet-4-6"), false);
 });

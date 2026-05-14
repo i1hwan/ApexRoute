@@ -26,21 +26,245 @@ export interface ModelSpec {
 }
 
 export const MODEL_SPECS: Record<string, ModelSpec> = {
+  // ── OpenAI Codex GPT 5.5 ───────────────────────────────────────
+  "gpt-5.5": {
+    maxOutputTokens: 128000,
+    contextWindow: 1050000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+    aliases: [
+      "gpt5.5",
+      "gpt-5.5-xhigh",
+      "gpt-5.5-high",
+      "gpt-5.5-medium",
+      "gpt-5.5-low",
+      "gpt-5.5-none",
+    ],
+  },
+  "gpt-5.5-pro": {
+    maxOutputTokens: 128000,
+    contextWindow: 1050000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+    aliases: ["gpt5.5-pro"],
+  },
+
+  // ── OpenAI/Codex GPT 5.x ───────────────────────────────────────
+  "gpt-5.4": {
+    maxOutputTokens: 128000,
+    contextWindow: 1050000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+    aliases: ["gpt5.4"],
+  },
+  "gpt-5.4-pro": {
+    maxOutputTokens: 128000,
+    contextWindow: 1050000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+    aliases: ["gpt5.4-pro"],
+  },
+  "gpt-5.4-mini": {
+    maxOutputTokens: 128000,
+    contextWindow: 400000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+    aliases: ["gpt5.4-mini"],
+  },
+  "gpt-5.4-nano": {
+    maxOutputTokens: 128000,
+    contextWindow: 400000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+    aliases: ["gpt5.4-nano"],
+  },
+  "gpt-5.3-codex-spark": {
+    maxOutputTokens: 32000,
+    contextWindow: 128000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+    aliases: [
+      "gpt-5.3-codex-spark-xhigh",
+      "gpt-5.3-codex-spark-high",
+      "gpt-5.3-codex-spark-medium",
+      "gpt-5.3-codex-spark-low",
+      "gpt-5.3-codex-spark-none",
+    ],
+  },
+  "gpt-5.3-codex": {
+    maxOutputTokens: 128000,
+    contextWindow: 400000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+    aliases: [
+      "gpt-5.3-codex-xhigh",
+      "gpt-5.3-codex-high",
+      "gpt-5.3-codex-medium",
+      "gpt-5.3-codex-low",
+      "gpt-5.3-codex-none",
+    ],
+  },
+  "gpt-5.3-chat-latest": {
+    maxOutputTokens: 16384,
+    contextWindow: 128000,
+    supportsThinking: false,
+    supportsTools: true,
+    supportsVision: true,
+  },
+  "gpt-5.2-codex": {
+    maxOutputTokens: 128000,
+    contextWindow: 400000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+  },
+  "gpt-5.2": {
+    maxOutputTokens: 128000,
+    contextWindow: 400000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+  },
+  "gpt-5.2-chat-latest": {
+    maxOutputTokens: 16384,
+    contextWindow: 128000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+  },
+  "gpt-5.2-pro": {
+    maxOutputTokens: 128000,
+    contextWindow: 400000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+  },
+  "gpt-5.1": {
+    maxOutputTokens: 128000,
+    contextWindow: 400000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+  },
+  "gpt-5.1-chat-latest": {
+    maxOutputTokens: 16384,
+    contextWindow: 128000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+  },
+  "gpt-5.1-codex": {
+    maxOutputTokens: 128000,
+    contextWindow: 400000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+    aliases: ["gpt-5.1-codex-max"],
+  },
+  "gpt-5.1-codex-mini": {
+    maxOutputTokens: 128000,
+    contextWindow: 400000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+  },
+  "gpt-5": {
+    maxOutputTokens: 128000,
+    contextWindow: 400000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+  },
+  "gpt-5-chat-latest": {
+    maxOutputTokens: 128000,
+    contextWindow: 400000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+  },
+  "gpt-5-mini": {
+    maxOutputTokens: 128000,
+    contextWindow: 400000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+  },
+  "gpt-5-nano": {
+    maxOutputTokens: 128000,
+    contextWindow: 400000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+  },
+  "gpt-5-pro": {
+    maxOutputTokens: 272000,
+    contextWindow: 400000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+  },
+  "gpt-5-codex": {
+    maxOutputTokens: 128000,
+    contextWindow: 400000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+  },
+  "gpt-5-codex-mini": {
+    maxOutputTokens: 128000,
+    contextWindow: 400000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+  },
+
   // ── Gemini 3 Flash series ───────────────────────────────────────
   "gemini-3-flash": {
     maxOutputTokens: 65536,
     contextWindow: 1048576,
-    defaultThinkingBudget: 0,
-    thinkingBudgetCap: 0,
-    supportsThinking: false,
+    defaultThinkingBudget: 8192,
+    thinkingBudgetCap: 32768,
+    supportsThinking: true,
     supportsTools: true,
     supportsVision: true,
-    aliases: ["gemini-3-flash-preview", "gemini-3.1-flash-lite-preview"],
+    aliases: ["gemini-3-flash-preview", "gemini-3.1-flash-lite-preview", "gemini-3.1-flash-lite"],
+  },
+
+  // ── Gemini 3 Pro series ─────────────────────────────────────────
+  "gemini-3-pro-preview": {
+    maxOutputTokens: 64000,
+    contextWindow: 1000000,
+    defaultThinkingBudget: 24576,
+    thinkingBudgetCap: 32768,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+    aliases: ["gemini-3-pro"],
+  },
+
+  // ── Gemini 3.1 Flash Image ──────────────────────────────────────
+  "gemini-3.1-flash-image-preview": {
+    maxOutputTokens: 32768,
+    contextWindow: 131072,
+    defaultThinkingBudget: 8192,
+    thinkingBudgetCap: 32768,
+    supportsThinking: true,
+    supportsTools: false,
+    supportsVision: true,
+    aliases: ["gemini-3.1-flash-image"],
   },
 
   // ── Gemini 3.1 Pro High ─────────────────────────────────────────
   "gemini-3.1-pro-high": {
-    maxOutputTokens: 65535,
+    maxOutputTokens: 65536,
     contextWindow: 1048576,
     defaultThinkingBudget: 24576,
     thinkingBudgetCap: 32768,
@@ -53,7 +277,7 @@ export const MODEL_SPECS: Record<string, ModelSpec> = {
 
   // ── Gemini 3.1 Pro Low ──────────────────────────────────────────
   "gemini-3.1-pro-low": {
-    maxOutputTokens: 65535,
+    maxOutputTokens: 65536,
     contextWindow: 1048576,
     defaultThinkingBudget: 8192,
     thinkingBudgetCap: 16000,
@@ -63,21 +287,10 @@ export const MODEL_SPECS: Record<string, ModelSpec> = {
     aliases: ["gemini-3-pro-low"],
   },
 
-  // ── Claude Opus 4.5 ─────────────────────────────────────────────
-  "claude-opus-4-5": {
-    maxOutputTokens: 32768,
-    contextWindow: 200000,
-    defaultThinkingBudget: 10000,
-    thinkingBudgetCap: 32000,
-    supportsThinking: true,
-    supportsTools: true,
-    supportsVision: true,
-  },
-
   // ── Claude Opus 4.6 ─────────────────────────────────────────────
   "claude-opus-4-6": {
     maxOutputTokens: 128000,
-    contextWindow: 1048576,
+    contextWindow: 1000000,
     defaultThinkingBudget: 10000,
     thinkingBudgetCap: 128000,
     supportsThinking: true,
@@ -86,12 +299,18 @@ export const MODEL_SPECS: Record<string, ModelSpec> = {
     supportedThinkingModes: ["enabled", "adaptive", "disabled"],
     supportedEfforts: ["low", "medium", "high", "max"],
     defaultThinkingDisplay: "summarized",
+    aliases: [
+      "claude-opus-4.6",
+      "claude-opus-4-6-20251031",
+      "claude-opus-4-6-thinking",
+      "claude-opus-4.6-thinking",
+    ],
   },
 
   // ── Claude Opus 4.7 ─────────────────────────────────────────────
   "claude-opus-4-7": {
     maxOutputTokens: 128000,
-    contextWindow: 1048576,
+    contextWindow: 1000000,
     defaultThinkingBudget: 0,
     thinkingBudgetCap: 0,
     supportsThinking: true,
@@ -101,6 +320,112 @@ export const MODEL_SPECS: Record<string, ModelSpec> = {
     supportedEfforts: ["low", "medium", "high", "xhigh", "max"],
     defaultThinkingDisplay: "omitted",
     rejectsSamplingParams: true,
+    aliases: ["claude-opus-4.7", "claude-opus-4-7-thinking", "claude-opus-4.7-thinking"],
+  },
+
+  // ── Claude Sonnet 4.6 ───────────────────────────────────────────
+  "claude-sonnet-4-6": {
+    maxOutputTokens: 64000,
+    contextWindow: 1000000,
+    defaultThinkingBudget: 10000,
+    thinkingBudgetCap: 64000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+    supportedThinkingModes: ["enabled", "adaptive", "disabled"],
+    supportedEfforts: ["low", "medium", "high", "max"],
+    aliases: [
+      "claude-sonnet-4.6",
+      "claude-sonnet-4-6-20251031",
+      "claude-sonnet-4-6-thinking",
+      "claude-sonnet-4.6-thinking",
+    ],
+  },
+
+  // ── Claude Sonnet 4.5 ───────────────────────────────────────────
+  "claude-sonnet-4-5": {
+    maxOutputTokens: 64000,
+    contextWindow: 200000,
+    defaultThinkingBudget: 10000,
+    thinkingBudgetCap: 64000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+    supportedThinkingModes: ["enabled", "adaptive", "disabled"],
+    supportedEfforts: ["low", "medium", "high", "max"],
+    aliases: [
+      "claude-sonnet-4.5",
+      "claude-sonnet-4-5-20250929",
+      "claude-sonnet-4-5@20251101",
+      "claude-sonnet-4-5-thinking",
+      "claude-sonnet-4.5-thinking",
+    ],
+  },
+
+  // ── Claude Sonnet 4.0 ───────────────────────────────────────────
+  "claude-sonnet-4": {
+    maxOutputTokens: 64000,
+    contextWindow: 200000,
+    defaultThinkingBudget: 10000,
+    thinkingBudgetCap: 64000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+    supportedThinkingModes: ["enabled", "adaptive", "disabled"],
+    supportedEfforts: ["low", "medium", "high", "max"],
+    aliases: [
+      "claude-sonnet-4-0",
+      "claude-sonnet-4.0",
+      "claude-sonnet-4-20250514",
+      "claude-sonnet-4-thinking",
+    ],
+  },
+
+  // ── Claude Haiku 4.5 ────────────────────────────────────────────
+  "claude-haiku-4-5": {
+    maxOutputTokens: 64000,
+    contextWindow: 200000,
+    defaultThinkingBudget: 10000,
+    thinkingBudgetCap: 64000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+    supportedThinkingModes: ["enabled", "adaptive", "disabled"],
+    supportedEfforts: ["low", "medium", "high", "max"],
+    aliases: ["claude-haiku-4.5", "claude-haiku-4-5-20251001"],
+  },
+
+  // ── Claude Opus 4.1 ─────────────────────────────────────────────
+  "claude-opus-4-1": {
+    maxOutputTokens: 32000,
+    contextWindow: 200000,
+    defaultThinkingBudget: 10000,
+    thinkingBudgetCap: 32000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+    supportedThinkingModes: ["enabled", "adaptive", "disabled"],
+    supportedEfforts: ["low", "medium", "high", "max"],
+    aliases: ["claude-opus-4.1", "claude-opus-4-1-20250805"],
+  },
+
+  // ── Claude Opus 4.0 ─────────────────────────────────────────────
+  "claude-opus-4": {
+    maxOutputTokens: 32000,
+    contextWindow: 200000,
+    defaultThinkingBudget: 10000,
+    thinkingBudgetCap: 32000,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+    supportedThinkingModes: ["enabled", "adaptive", "disabled"],
+    supportedEfforts: ["low", "medium", "high", "max"],
+    aliases: [
+      "claude-opus-4-0",
+      "claude-opus-4.0",
+      "claude-opus-4-20250514",
+      "claude-opus-4-thinking",
+    ],
   },
 
   // Defaults
@@ -109,17 +434,41 @@ export const MODEL_SPECS: Record<string, ModelSpec> = {
   },
 };
 
-export function getModelSpec(modelId: string): ModelSpec | undefined {
-  if (MODEL_SPECS[modelId]) return MODEL_SPECS[modelId];
+function getModelSpecLookupIds(modelId: string): string[] {
+  const ids = [modelId];
+  if (modelId.includes("/")) {
+    const lastSegment = modelId.split("/").filter(Boolean).at(-1);
+    if (lastSegment) ids.push(lastSegment);
+  }
+  return [...new Set(ids)];
+}
 
-  // Buscas por alias
-  for (const [canonical, spec] of Object.entries(MODEL_SPECS)) {
-    if (spec.aliases?.includes(modelId)) return spec;
+const MODEL_SPEC_ENTRIES = Object.entries(MODEL_SPECS).filter(
+  ([canonical]) => canonical !== "__default__"
+);
+
+// Prefix matching checks longer keys first so specific IDs like
+// gpt-5.3-codex-spark are not swallowed by gpt-5.3-codex.
+const MODEL_SPEC_ENTRIES_BY_LONGEST_PREFIX = [...MODEL_SPEC_ENTRIES].sort(
+  ([left], [right]) => right.length - left.length
+);
+
+export function getModelSpec(modelId: string): ModelSpec | undefined {
+  const lookupIds = getModelSpecLookupIds(modelId);
+
+  for (const lookupId of lookupIds) {
+    if (MODEL_SPECS[lookupId]) return MODEL_SPECS[lookupId];
   }
 
-  // Prefix matching
-  for (const [key, spec] of Object.entries(MODEL_SPECS)) {
-    if (key !== "__default__" && modelId.startsWith(key)) return spec;
+  // Buscas por alias
+  for (const [, spec] of MODEL_SPEC_ENTRIES) {
+    if (lookupIds.some((lookupId) => spec.aliases?.includes(lookupId))) return spec;
+  }
+
+  for (const lookupId of lookupIds) {
+    for (const [key, spec] of MODEL_SPEC_ENTRIES_BY_LONGEST_PREFIX) {
+      if (lookupId.startsWith(key)) return spec;
+    }
   }
 
   return undefined;
@@ -141,8 +490,9 @@ export function capThinkingBudget(modelId: string, budget: number): number {
 }
 
 export function resolveModelAlias(modelId: string): string {
-  for (const [canonical, spec] of Object.entries(MODEL_SPECS)) {
-    if (spec.aliases?.includes(modelId)) return canonical;
+  const lookupIds = getModelSpecLookupIds(modelId);
+  for (const [canonical, spec] of MODEL_SPEC_ENTRIES) {
+    if (spec.aliases?.some((alias) => lookupIds.includes(alias))) return canonical;
   }
   return modelId;
 }

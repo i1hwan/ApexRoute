@@ -5,7 +5,7 @@ import {
   isOpenAICompatibleProvider,
   isAnthropicCompatibleProvider,
 } from "@/shared/constants/providers";
-import { PROVIDER_MODELS } from "@/shared/constants/models";
+import { PROVIDER_MODELS, getModelsByProviderId } from "@/shared/constants/models";
 import { getModelIsHidden, resolveProxyForProvider } from "@/lib/localDb";
 import { getStaticQoderModels } from "@omniroute/open-sse/services/qoderCli.ts";
 import { runWithProxyContext } from "@omniroute/open-sse/utils/proxyFetch.ts";
@@ -20,6 +20,34 @@ function getProviderBaseUrl(providerSpecificData: unknown): string | null {
   const data = asRecord(providerSpecificData);
   const baseUrl = data.baseUrl;
   return typeof baseUrl === "string" && baseUrl.trim().length > 0 ? baseUrl : null;
+}
+
+function getProviderModelsPath(providerSpecificData: unknown): string | null {
+  const data = asRecord(providerSpecificData);
+  const modelsPath = data.modelsPath;
+  if (typeof modelsPath !== "string") return null;
+  const trimmed = modelsPath.trim();
+  if (!trimmed.startsWith("/")) return null;
+  if (trimmed.length > 512) return null;
+  if (/[\u0000-\u001F\u007F]/.test(trimmed)) return null;
+  const pathOnly = trimmed.split(/[?#]/)[0];
+  let decodedPathOnly = pathOnly;
+  try {
+    decodedPathOnly = decodeURIComponent(pathOnly);
+  } catch {
+    return null;
+  }
+  if (/[\u0000-\u001F\u007F]/.test(decodedPathOnly)) return null;
+  if (pathOnly.split("/").includes("..") || decodedPathOnly.split("/").includes("..")) {
+    return null;
+  }
+  return trimmed;
+}
+
+function joinUrlPath(baseUrl: string, path: string): string {
+  const normalizedBase = baseUrl.replace(/\/$/, "");
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  return `${normalizedBase}${normalizedPath}`;
 }
 
 const GLM_MODELS_URLS = {
@@ -51,8 +79,17 @@ const KIMI_CODING_MODELS_CONFIG: ProviderModelsConfigEntry = {
   parseResponse: (data) => data.data || data.models || [],
 };
 
+type ModelListItem = { id: string; name: string };
+
+function getRegistryStaticModels(provider: string): ModelListItem[] {
+  return getModelsByProviderId(provider).map((model: any) => ({
+    id: model.id,
+    name: model.name || model.id,
+  }));
+}
+
 // Providers that return hardcoded models (no remote /models API)
-const STATIC_MODEL_PROVIDERS: Record<string, () => Array<{ id: string; name: string }>> = {
+const STATIC_MODEL_PROVIDERS: Record<string, () => ModelListItem[]> = {
   deepgram: () => [
     { id: "nova-3", name: "Nova 3 (Transcription)" },
     { id: "nova-2", name: "Nova 2 (Transcription)" },
@@ -78,13 +115,8 @@ const STATIC_MODEL_PROVIDERS: Record<string, () => Array<{ id: string; name: str
     { id: "gemini-3.1-pro-low", name: "Gemini 3.1 Pro (Low)" },
     { id: "gpt-oss-120b-medium", name: "GPT OSS 120B Medium" },
   ],
-  claude: () => [
-    { id: "claude-opus-4-6", name: "Claude Opus 4.6" },
-    { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" },
-    { id: "claude-opus-4-5-20251101", name: "Claude Opus 4.5 (2025-11-01)" },
-    { id: "claude-sonnet-4-5-20250929", name: "Claude Sonnet 4.5 (2025-09-29)" },
-    { id: "claude-haiku-4-5-20251001", name: "Claude Haiku 4.5 (2025-10-01)" },
-  ],
+  claude: () => getRegistryStaticModels("claude"),
+  codex: () => getRegistryStaticModels("codex"),
   perplexity: () => [
     { id: "sonar", name: "Sonar (Fast Search)" },
     { id: "sonar-pro", name: "Sonar Pro (Advanced Search)" },
@@ -421,25 +453,48 @@ export async function GET(
         );
       }
 
-      let base = baseUrl.replace(/\/$/, "");
+      const originalBase = baseUrl.replace(/\/$/, "");
+      let base = originalBase;
+      let customModelsBase = originalBase;
+      let baseUrlIsChatEndpoint = false;
       if (base.endsWith("/chat/completions")) {
         base = base.slice(0, -17);
+        customModelsBase = base;
+        baseUrlIsChatEndpoint = true;
       } else if (base.endsWith("/completions")) {
         base = base.slice(0, -12);
+        customModelsBase = base;
+        baseUrlIsChatEndpoint = true;
       } else if (base.endsWith("/v1")) {
         base = base.slice(0, -3);
       }
 
+      const customModelsPath = getProviderModelsPath(connection.providerSpecificData);
+
       // T39: Try multiple endpoint formats
-      const endpoints = [
+      const defaultEndpoints = [
         `${base}/v1/models`,
         `${base}/models`,
         `${baseUrl.replace(/\/$/, "")}/models`, // Original fallback
       ];
+      const endpoints = customModelsPath
+        ? baseUrlIsChatEndpoint
+          ? [
+              joinUrlPath(customModelsBase, customModelsPath),
+              joinUrlPath(originalBase, customModelsPath),
+              ...defaultEndpoints,
+            ]
+          : [
+              joinUrlPath(originalBase, customModelsPath),
+              joinUrlPath(base, customModelsPath),
+              ...defaultEndpoints,
+            ]
+        : defaultEndpoints;
 
       // Remove duplicates
       const uniqueEndpoints = [...new Set(endpoints)];
       let models = null;
+      let source: "api" | "local_catalog" | null = null;
       let lastErrorStatus = null;
 
       for (const modelsUrl of uniqueEndpoints) {
@@ -458,6 +513,7 @@ export async function GET(
           if (response.ok) {
             const data = await response.json();
             models = data.data || data.models || [];
+            source = "api";
             break; // Success!
           }
 
@@ -486,19 +542,14 @@ export async function GET(
           name: m.name || m.id,
           owned_by: provider,
         }));
+        source = "local_catalog";
       }
-
-      // Track source for MCP tool T39 requirement
-      const source =
-        models === null || (models && models.length > 0 && models[0].owned_by === provider)
-          ? "local_catalog"
-          : "api";
 
       return buildResponse({
         provider,
         connectionId,
         models,
-        source,
+        source: source || "api",
         ...(source === "local_catalog"
           ? { warning: "API unavailable — using cached catalog" }
           : {}),
@@ -623,16 +674,19 @@ export async function GET(
         baseUrl = baseUrl.slice(0, -9);
       }
 
-      const url = `${baseUrl}/models`;
-      const token = accessToken || apiKey;
+      const modelsPath = getProviderModelsPath(connection.providerSpecificData) || "/models";
+      const url = joinUrlPath(baseUrl, modelsPath);
       const response = await runWithProxyContext(proxy, () =>
         fetch(url, {
           method: "GET",
           headers: {
             "Content-Type": "application/json",
-            ...(apiKey ? { "x-api-key": apiKey } : {}),
             "anthropic-version": "2023-06-01",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            ...(apiKey
+              ? { "x-api-key": apiKey }
+              : accessToken
+                ? { Authorization: `Bearer ${accessToken}` }
+                : {}),
           },
         })
       );

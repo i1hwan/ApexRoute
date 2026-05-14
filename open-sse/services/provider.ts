@@ -43,8 +43,46 @@ export function getOpenAICompatibleType(provider, providerSpecificData = null) {
   return provider.includes("responses") ? "responses" : "chat";
 }
 
-function buildOpenAICompatibleUrl(baseUrl, apiType) {
+function getSanitizedCustomPath(providerSpecificData) {
+  const rawPath =
+    providerSpecificData &&
+    typeof providerSpecificData === "object" &&
+    typeof providerSpecificData.chatPath === "string"
+      ? providerSpecificData.chatPath
+      : "";
+  const trimmed = rawPath.trim();
+  if (!trimmed) return null;
+  if (!trimmed.startsWith("/")) return null;
+  if (trimmed.length > 512) return null;
+  if (/[\x00-\x1f\x7f]/.test(trimmed)) return null;
+
+  const rawPathOnly = trimmed.split(/[?#]/)[0];
+  let decodedPathOnly = rawPathOnly;
+  try {
+    decodedPathOnly = decodeURIComponent(rawPathOnly);
+  } catch {
+    return null;
+  }
+
+  if (/[\x00-\x1f\x7f]/.test(decodedPathOnly)) return null;
+  if (rawPathOnly.split("/").includes("..") || decodedPathOnly.split("/").includes("..")) {
+    return null;
+  }
+
+  return trimmed;
+}
+
+function isResponsesEndpointPath(path) {
+  return /\/responses(?=\/|$|\?|#)/i.test(path);
+}
+
+export function buildOpenAICompatibleUrl(baseUrl, apiType, providerSpecificData = null) {
   const normalized = baseUrl.replace(/\/$/, "");
+  const customPath = getSanitizedCustomPath(providerSpecificData);
+  if (customPath && (apiType !== "responses" || isResponsesEndpointPath(customPath))) {
+    return `${normalized}${customPath}`;
+  }
+
   const path = apiType === "responses" ? "/responses" : "/chat/completions";
   return `${normalized}${path}`;
 }
@@ -230,7 +268,7 @@ export function buildProviderUrl(
       options?.baseUrl ||
       (typeof providerSpecificData?.baseUrl === "string" ? providerSpecificData.baseUrl : null) ||
       OPENAI_COMPATIBLE_DEFAULTS.baseUrl;
-    return buildOpenAICompatibleUrl(baseUrl, apiType);
+    return buildOpenAICompatibleUrl(baseUrl, apiType, providerSpecificData);
   }
   if (isAnthropicCompatible(provider)) {
     const baseUrl = options?.baseUrl || ANTHROPIC_COMPATIBLE_DEFAULTS.baseUrl;

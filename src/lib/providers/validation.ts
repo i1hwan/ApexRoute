@@ -15,6 +15,10 @@ import {
   isOpenAICompatibleProvider,
 } from "@/shared/constants/providers";
 import { validateQoderCliPat } from "@omniroute/open-sse/services/qoderCli.ts";
+import {
+  buildOpenAICompatibleUrl,
+  getOpenAICompatibleType,
+} from "@omniroute/open-sse/services/provider.ts";
 
 const OPENAI_LIKE_FORMATS = new Set(["openai", "openai-responses"]);
 const GEMINI_LIKE_FORMATS = new Set(["gemini", "gemini-cli"]);
@@ -56,13 +60,8 @@ function resolveChatUrl(provider: string, baseUrl: string, providerSpecificData:
   if (!normalized) return "";
 
   if (isOpenAICompatibleProvider(provider)) {
-    if (providerSpecificData?.chatPath) {
-      return `${normalized}${providerSpecificData.chatPath}`;
-    }
-    if (providerSpecificData?.apiType === "responses") {
-      return `${normalized}/responses`;
-    }
-    return `${normalized}/chat/completions`;
+    const apiType = getOpenAICompatibleType(provider, providerSpecificData);
+    return buildOpenAICompatibleUrl(normalized, apiType, providerSpecificData);
   }
 
   if (
@@ -480,7 +479,11 @@ async function validateBailianCodingPlanProvider({ apiKey, providerSpecificData 
   }
 }
 
-async function validateOpenAICompatibleProvider({ apiKey, providerSpecificData = {} }: any) {
+async function validateOpenAICompatibleProvider({
+  provider,
+  apiKey,
+  providerSpecificData = {},
+}: any) {
   const baseUrl = normalizeBaseUrl(providerSpecificData.baseUrl);
   if (!baseUrl) {
     return { valid: false, error: "No base URL configured for OpenAI compatible provider" };
@@ -533,9 +536,8 @@ async function validateOpenAICompatibleProvider({ apiKey, providerSpecificData =
 
   // Step 2: Fallback — try a minimal chat completion request
   // Many providers don't expose /models but accept chat completions fine
-  const apiType = providerSpecificData.apiType || "chat";
-  const chatSuffix = apiType === "responses" ? "/responses" : "/chat/completions";
-  const chatUrl = `${baseUrl}${chatSuffix}`;
+  const apiType = getOpenAICompatibleType(provider, providerSpecificData);
+  const chatUrl = buildOpenAICompatibleUrl(baseUrl, apiType, providerSpecificData);
   const testModelId = validationModelId;
 
   try {
@@ -839,7 +841,7 @@ export async function validateProviderApiKey({ provider, apiKey, providerSpecifi
 
   if (isOpenAICompatibleProvider(provider)) {
     try {
-      return await validateOpenAICompatibleProvider({ apiKey, providerSpecificData });
+      return await validateOpenAICompatibleProvider({ provider, apiKey, providerSpecificData });
     } catch (error: any) {
       return { valid: false, error: error.message || "Validation failed", unsupported: false };
     }

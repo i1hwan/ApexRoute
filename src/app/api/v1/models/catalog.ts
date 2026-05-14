@@ -20,6 +20,7 @@ import { getAllMusicModels } from "@omniroute/open-sse/config/musicRegistry.ts";
 import { REGISTRY } from "@omniroute/open-sse/config/providerRegistry.ts";
 import { getSyncedAvailableModels } from "@/lib/db/models";
 import { getCompatibleFallbackModels } from "@/lib/providers/managedAvailableModels";
+import { getModelSpec } from "@/shared/constants/modelSpecs";
 
 const FALLBACK_ALIAS_TO_PROVIDER = {
   ag: "antigravity",
@@ -75,6 +76,90 @@ function getVisionCapabilityFields(modelId: string) {
     input_modalities: ["text", "image"],
     output_modalities: ["text"],
   };
+}
+
+function getSupportedReasoningEfforts(model: any, spec: any): string[] | undefined {
+  if (spec?.supportsThinking === false) return undefined;
+  if (Array.isArray(spec?.supportedEfforts) && spec.supportedEfforts.length > 0) {
+    return spec.supportedEfforts;
+  }
+  if (model?.supportsReasoning === true || model?.supportsThinking === true) {
+    return model?.supportsXHighEffort === true
+      ? ["none", "low", "medium", "high", "xhigh"]
+      : ["low", "medium", "high"];
+  }
+  return undefined;
+}
+
+function getCapabilityMetadata(model: any, modelId: string, visionFields: any = null) {
+  const spec = getModelSpec(model?.id || modelId) || getModelSpec(modelId);
+  const capabilities: Record<string, boolean> = {
+    ...(visionFields?.capabilities || {}),
+  };
+  const fields: Record<string, unknown> = {};
+
+  if (model?.supportsVision === true || spec?.supportsVision === true || capabilities.vision) {
+    capabilities.vision = true;
+    fields.input_modalities = visionFields?.input_modalities || ["text", "image"];
+    fields.output_modalities = visionFields?.output_modalities || ["text"];
+  } else if (visionFields?.input_modalities || visionFields?.output_modalities) {
+    if (visionFields.input_modalities) fields.input_modalities = visionFields.input_modalities;
+    if (visionFields.output_modalities) fields.output_modalities = visionFields.output_modalities;
+  }
+
+  const supportsTools =
+    typeof spec?.supportsTools === "boolean"
+      ? spec.supportsTools
+      : model?.toolCalling === true || model?.supportsTools === true;
+  if (supportsTools) {
+    capabilities.tools = true;
+    capabilities.tool_calling = true;
+  }
+
+  const supportsReasoning =
+    typeof spec?.supportsThinking === "boolean"
+      ? spec.supportsThinking
+      : model?.supportsReasoning === true || model?.supportsThinking === true;
+  if (supportsReasoning) {
+    capabilities.reasoning = true;
+    capabilities.thinking = true;
+  }
+
+  const maxOutputTokens =
+    typeof model?.maxOutputTokens === "number"
+      ? model.maxOutputTokens
+      : typeof model?.outputTokenLimit === "number"
+        ? model.outputTokenLimit
+        : spec?.maxOutputTokens;
+  if (typeof maxOutputTokens === "number") {
+    fields.max_output_tokens = maxOutputTokens;
+  }
+
+  const targetFormat = typeof model?.targetFormat === "string" ? model.targetFormat : undefined;
+  if (targetFormat) {
+    fields.target_format = targetFormat;
+    if (targetFormat === "openai-responses") {
+      fields.api_format = "responses";
+    }
+  }
+
+  const efforts = getSupportedReasoningEfforts(model, spec);
+  if (efforts) fields.supported_reasoning_efforts = efforts;
+  if (Array.isArray(spec?.supportedThinkingModes)) {
+    fields.supported_thinking_modes = spec.supportedThinkingModes;
+  }
+  if (typeof spec?.defaultThinkingDisplay === "string") {
+    fields.default_thinking_display = spec.defaultThinkingDisplay;
+  }
+  if (spec?.rejectsSamplingParams === true) {
+    fields.rejects_sampling_params = true;
+  }
+
+  if (Object.keys(capabilities).length > 0) {
+    fields.capabilities = capabilities;
+  }
+
+  return fields;
 }
 
 function buildAliasMaps() {
@@ -263,7 +348,9 @@ export async function getUnifiedModelsResponse(
         const visionFields =
           getVisionCapabilityFields(aliasId) || getVisionCapabilityFields(model.id);
         // Model-level context length overrides provider default
-        const contextLength = model.contextLength || defaultContextLength;
+        const spec = getModelSpec(model.id);
+        const contextLength = model.contextLength || spec?.contextWindow || defaultContextLength;
+        const capabilityFields = getCapabilityMetadata(model, aliasId, visionFields);
 
         models.push({
           id: aliasId,
@@ -274,7 +361,7 @@ export async function getUnifiedModelsResponse(
           root: model.id,
           parent: null,
           ...(contextLength ? { context_length: contextLength } : {}),
-          ...(visionFields || {}),
+          ...capabilityFields,
         });
 
         // Add provider-id prefix in addition to short alias (ex: kiro/model + kr/model).
@@ -283,6 +370,11 @@ export async function getUnifiedModelsResponse(
           const providerIdModel = `${canonicalProviderId}/${model.id}`;
           const providerVisionFields =
             getVisionCapabilityFields(providerIdModel) || getVisionCapabilityFields(model.id);
+          const providerCapabilityFields = getCapabilityMetadata(
+            model,
+            providerIdModel,
+            providerVisionFields
+          );
           models.push({
             id: providerIdModel,
             object: "model",
@@ -292,7 +384,7 @@ export async function getUnifiedModelsResponse(
             root: model.id,
             parent: aliasId,
             ...(contextLength ? { context_length: contextLength } : {}),
-            ...(providerVisionFields || {}),
+            ...providerCapabilityFields,
           });
         }
       }
@@ -494,10 +586,11 @@ export async function getUnifiedModelsResponse(
           if (endpoints.includes("embeddings")) modelType = "embedding";
           else if (endpoints.includes("images")) modelType = "image";
           else if (endpoints.includes("audio")) modelType = "audio";
-          const visionFields =
-            modelType === "chat"
-              ? getVisionCapabilityFields(aliasId) || getVisionCapabilityFields(modelId)
-              : null;
+          const isChatModel = !modelType || endpoints.includes("chat");
+          const visionFields = isChatModel
+            ? getVisionCapabilityFields(aliasId) || getVisionCapabilityFields(modelId)
+            : null;
+          const capabilityFields = getCapabilityMetadata(model, aliasId, visionFields);
 
           models.push({
             id: aliasId,
@@ -516,18 +609,21 @@ export async function getUnifiedModelsResponse(
             ...(typeof (model as any).inputTokenLimit === "number"
               ? { context_length: (model as any).inputTokenLimit }
               : {}),
-            ...(visionFields || {}),
+            ...capabilityFields,
           });
 
           // Only add provider-prefixed version if different from alias
           if (canonicalProviderId !== alias && !prefix) {
             const providerPrefixedId = `${canonicalProviderId}/${modelId}`;
             if (models.some((m) => m.id === providerPrefixedId)) continue;
-            const providerVisionFields =
-              modelType === "chat"
-                ? getVisionCapabilityFields(providerPrefixedId) ||
-                  getVisionCapabilityFields(modelId)
-                : null;
+            const providerVisionFields = isChatModel
+              ? getVisionCapabilityFields(providerPrefixedId) || getVisionCapabilityFields(modelId)
+              : null;
+            const providerCapabilityFields = getCapabilityMetadata(
+              model,
+              providerPrefixedId,
+              providerVisionFields
+            );
             models.push({
               id: providerPrefixedId,
               object: "model",
@@ -538,10 +634,14 @@ export async function getUnifiedModelsResponse(
               parent: aliasId,
               custom: true,
               ...(modelType ? { type: modelType } : {}),
+              ...(apiFormat !== "chat-completions" ? { api_format: apiFormat } : {}),
+              ...(endpoints.length > 1 || !endpoints.includes("chat")
+                ? { supported_endpoints: endpoints }
+                : {}),
               ...(typeof (model as any).inputTokenLimit === "number"
                 ? { context_length: (model as any).inputTokenLimit }
                 : {}),
-              ...(providerVisionFields || {}),
+              ...providerCapabilityFields,
             });
           }
         }
@@ -572,10 +672,13 @@ export async function getUnifiedModelsResponse(
 
         const visionFields =
           getVisionCapabilityFields(aliasId) || getVisionCapabilityFields(modelId);
+        const capabilityFields = getCapabilityMetadata(model, aliasId, visionFields);
         const contextLength =
           typeof (model as any).contextLength === "number"
             ? (model as any).contextLength
-            : undefined;
+            : typeof getModelSpec(modelId)?.contextWindow === "number"
+              ? getModelSpec(modelId)?.contextWindow
+              : undefined;
 
         models.push({
           id: aliasId,
@@ -586,7 +689,7 @@ export async function getUnifiedModelsResponse(
           root: modelId,
           parent: null,
           ...(contextLength ? { context_length: contextLength } : {}),
-          ...(visionFields || {}),
+          ...capabilityFields,
         });
       }
     }

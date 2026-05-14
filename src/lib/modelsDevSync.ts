@@ -152,7 +152,7 @@ const SYNC_INTERVAL_MS =
 const MODELS_DEV_PROVIDER_MAP: Record<string, string[]> = {
   // Major providers
   openai: ["openai", "cx"], // cx = Codex (uses OpenAI models)
-  anthropic: ["anthropic", "cc"], // cc = Claude Code
+  anthropic: ["anthropic", "claude", "cc"], // claude/cc = Claude OAuth + alias
   google: ["gemini", "gemini-cli"],
   vertex_ai: ["gemini", "vertex"],
   deepseek: ["deepseek", "if"], // if = Qoder (routes through DeepSeek)

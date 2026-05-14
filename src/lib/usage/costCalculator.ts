@@ -33,6 +33,32 @@ function toNumber(value: unknown, fallback = 0): number {
   return fallback;
 }
 
+function applyLongContextPricing(
+  pricing: Record<string, unknown>,
+  inputTokens: number,
+  prices: {
+    inputPrice: number;
+    cachedPrice: number;
+    outputPrice: number;
+    reasoningPrice: number;
+    cacheCreationPrice: number;
+  }
+) {
+  const threshold = toNumber(pricing.long_context_threshold, 0);
+  if (!threshold || inputTokens <= threshold) return prices;
+
+  const inputMultiplier = toNumber(pricing.long_context_input_multiplier, 1);
+  const outputMultiplier = toNumber(pricing.long_context_output_multiplier, 1);
+
+  return {
+    inputPrice: prices.inputPrice * inputMultiplier,
+    cachedPrice: prices.cachedPrice * inputMultiplier,
+    outputPrice: prices.outputPrice * outputMultiplier,
+    reasoningPrice: prices.reasoningPrice * outputMultiplier,
+    cacheCreationPrice: prices.cacheCreationPrice * inputMultiplier,
+  };
+}
+
 /**
  * Calculate cost for a usage entry.
  *
@@ -50,28 +76,32 @@ export function computeCostFromPricing(
   tokens: any
 ): number {
   if (!pricing || !tokens) return 0;
-  const inputPrice = toNumber(pricing.input, 0);
-  const cachedPrice = toNumber(pricing.cached, inputPrice);
-  const outputPrice = toNumber(pricing.output, 0);
-  const reasoningPrice = toNumber(pricing.reasoning, outputPrice);
-  const cacheCreationPrice = toNumber(pricing.cache_creation, inputPrice);
-
-  let cost = 0;
   const inputTokens = tokens.input ?? tokens.prompt_tokens ?? tokens.input_tokens ?? 0;
   const cachedTokens =
     tokens.cacheRead ?? tokens.cached_tokens ?? tokens.cache_read_input_tokens ?? 0;
+  const prices = applyLongContextPricing(pricing, inputTokens, {
+    inputPrice: toNumber(pricing.input, 0),
+    cachedPrice: toNumber(pricing.cached, toNumber(pricing.input, 0)),
+    outputPrice: toNumber(pricing.output, 0),
+    reasoningPrice: toNumber(pricing.reasoning, toNumber(pricing.output, 0)),
+    cacheCreationPrice: toNumber(pricing.cache_creation, toNumber(pricing.input, 0)),
+  });
+
+  let cost = 0;
   const nonCachedInput = Math.max(0, inputTokens - cachedTokens);
-  cost += nonCachedInput * (inputPrice / 1_000_000);
-  if (cachedTokens > 0) cost += cachedTokens * (cachedPrice / 1_000_000);
+  cost += nonCachedInput * (prices.inputPrice / 1_000_000);
+  if (cachedTokens > 0) cost += cachedTokens * (prices.cachedPrice / 1_000_000);
 
   const outputTokens = tokens.output ?? tokens.completion_tokens ?? tokens.output_tokens ?? 0;
-  cost += outputTokens * (outputPrice / 1_000_000);
+  cost += outputTokens * (prices.outputPrice / 1_000_000);
 
   const reasoningTokens = tokens.reasoning ?? tokens.reasoning_tokens ?? 0;
-  if (reasoningTokens > 0) cost += reasoningTokens * (reasoningPrice / 1_000_000);
+  if (reasoningTokens > 0) cost += reasoningTokens * (prices.reasoningPrice / 1_000_000);
 
   const cacheCreationTokens = tokens.cacheCreation ?? tokens.cache_creation_input_tokens ?? 0;
-  if (cacheCreationTokens > 0) cost += cacheCreationTokens * (cacheCreationPrice / 1_000_000);
+  if (cacheCreationTokens > 0) {
+    cost += cacheCreationTokens * (prices.cacheCreationPrice / 1_000_000);
+  }
 
   return cost;
 }
@@ -96,35 +126,38 @@ export async function calculateCost(provider, model, tokens) {
       pricing && typeof pricing === "object" && !Array.isArray(pricing)
         ? (pricing as Record<string, unknown>)
         : {};
-    const inputPrice = toNumber(pricingRecord.input, 0);
-    const cachedPrice = toNumber(pricingRecord.cached, inputPrice);
-    const outputPrice = toNumber(pricingRecord.output, 0);
-    const reasoningPrice = toNumber(pricingRecord.reasoning, outputPrice);
-    const cacheCreationPrice = toNumber(pricingRecord.cache_creation, inputPrice);
-
-    let cost = 0;
-
     const inputTokens = tokens.input ?? tokens.prompt_tokens ?? tokens.input_tokens ?? 0;
     const cachedTokens =
       tokens.cacheRead ?? tokens.cached_tokens ?? tokens.cache_read_input_tokens ?? 0;
+    const inputPrice = toNumber(pricingRecord.input, 0);
+    const outputPrice = toNumber(pricingRecord.output, 0);
+    const prices = applyLongContextPricing(pricingRecord, inputTokens, {
+      inputPrice,
+      cachedPrice: toNumber(pricingRecord.cached, inputPrice),
+      outputPrice,
+      reasoningPrice: toNumber(pricingRecord.reasoning, outputPrice),
+      cacheCreationPrice: toNumber(pricingRecord.cache_creation, inputPrice),
+    });
+
+    let cost = 0;
     const nonCachedInput = Math.max(0, inputTokens - cachedTokens);
-    cost += nonCachedInput * (inputPrice / 1000000);
+    cost += nonCachedInput * (prices.inputPrice / 1000000);
 
     if (cachedTokens > 0) {
-      cost += cachedTokens * (cachedPrice / 1000000);
+      cost += cachedTokens * (prices.cachedPrice / 1000000);
     }
 
     const outputTokens = tokens.output ?? tokens.completion_tokens ?? tokens.output_tokens ?? 0;
-    cost += outputTokens * (outputPrice / 1000000);
+    cost += outputTokens * (prices.outputPrice / 1000000);
 
     const reasoningTokens = tokens.reasoning ?? tokens.reasoning_tokens ?? 0;
     if (reasoningTokens > 0) {
-      cost += reasoningTokens * (reasoningPrice / 1000000);
+      cost += reasoningTokens * (prices.reasoningPrice / 1000000);
     }
 
     const cacheCreationTokens = tokens.cacheCreation ?? tokens.cache_creation_input_tokens ?? 0;
     if (cacheCreationTokens > 0) {
-      cost += cacheCreationTokens * (cacheCreationPrice / 1000000);
+      cost += cacheCreationTokens * (prices.cacheCreationPrice / 1000000);
     }
 
     return cost;

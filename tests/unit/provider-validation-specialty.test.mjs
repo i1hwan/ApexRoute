@@ -143,7 +143,6 @@ test("OpenAI-compatible validator covers /responses mode and final ping fallback
     apiKey: "sk-test",
     providerSpecificData: {
       baseUrl: "https://openai-like.example.com/v1",
-      apiType: "responses",
       validationModelId: "gpt-test",
     },
   });

@@ -55,11 +55,16 @@ import {
 } from "@/lib/localDb";
 import { getExecutor } from "../executors/index.ts";
 import { getCacheControlSettings } from "@/lib/cacheControlSettings";
+import { getCachedSettings } from "@/lib/db/readCache";
 import {
   shouldPreserveCacheControl,
   providerSupportsCaching,
 } from "../utils/cacheControlPolicy.ts";
 import { getCacheMetrics } from "@/lib/db/settings.ts";
+import {
+  sseDiagnosticsSettingsSchema,
+  SSE_DIAGNOSTICS_DEFAULT,
+} from "@/shared/validation/settingsSchemas";
 
 import {
   parseCodexQuotaHeaders,
@@ -71,7 +76,10 @@ import { invalidateCodexQuotaCache } from "../services/codexQuotaFetcher.ts";
 import { translateNonStreamingResponse } from "./responseTranslator.ts";
 import { extractUsageFromResponse } from "./usageExtractor.ts";
 import { applyClaudeOAuthLexicalRewrite } from "../translator/helpers/claudeHelper.ts";
-import { isValidForwardingLane } from "../translator/helpers/toolArgumentMode.ts";
+import {
+  isValidForwardingLane,
+  resolveToolArgumentMode,
+} from "../translator/helpers/toolArgumentMode.ts";
 import {
   parseSSEToClaudeResponse,
   parseSSEToOpenAIResponse,
@@ -175,6 +183,67 @@ export function shouldUseNativeCodexPassthrough({
   while (normalizedEndpoint.endsWith("/")) normalizedEndpoint = normalizedEndpoint.slice(0, -1);
   const segments = normalizedEndpoint.split("/");
   return segments.includes("responses");
+}
+
+function isOpenAICompatibleProviderId(provider: unknown): boolean {
+  return typeof provider === "string" && provider.startsWith("openai-compatible-");
+}
+
+type RequestScopedCredentials = {
+  providerSpecificData?: Record<string, unknown> | null;
+  [key: string]: unknown;
+};
+
+function withOpenAICompatibleApiTypeForTargetFormat(
+  credentials: RequestScopedCredentials | null | undefined,
+  provider: unknown,
+  targetFormat: string
+): RequestScopedCredentials | null | undefined {
+  if (!credentials || !isOpenAICompatibleProviderId(provider)) return credentials;
+  if (targetFormat !== FORMATS.OPENAI_RESPONSES) return credentials;
+
+  const providerSpecificData =
+    credentials.providerSpecificData && typeof credentials.providerSpecificData === "object"
+      ? credentials.providerSpecificData
+      : {};
+
+  if (providerSpecificData.apiType === "responses") return credentials;
+
+  return {
+    ...credentials,
+    providerSpecificData: {
+      ...providerSpecificData,
+      apiType: "responses",
+    },
+  };
+}
+
+type TrustedForwardingLane = "claude-oauth-prefixed" | null;
+
+async function resolveStreamCompatibilitySettings(
+  provider: string | null | undefined,
+  forwardingLane: TrustedForwardingLane
+) {
+  const settings = await getCachedSettings().catch(() => ({}));
+  const toolArgumentMode = resolveToolArgumentMode(
+    (settings as { toolArgumentMode?: unknown })?.toolArgumentMode as
+      | Parameters<typeof resolveToolArgumentMode>[0]
+      | undefined,
+    provider,
+    forwardingLane
+  );
+  const rawSseDiagnostics = (settings as { sseDiagnostics?: unknown }).sseDiagnostics;
+  const parsedSseDiagnostics = sseDiagnosticsSettingsSchema.safeParse({
+    ...SSE_DIAGNOSTICS_DEFAULT,
+    ...(rawSseDiagnostics && typeof rawSseDiagnostics === "object" ? rawSseDiagnostics : {}),
+  });
+
+  return {
+    toolArgumentMode,
+    sseDiagnosticsConfig: parsedSseDiagnostics.success
+      ? parsedSseDiagnostics.data
+      : SSE_DIAGNOSTICS_DEFAULT,
+  };
 }
 
 function stripInternalMarkers(body: Record<string, unknown> | null | undefined): void {
@@ -492,6 +561,11 @@ export async function handleChatCore({
   disableEmergencyFallback = false,
 }) {
   let { provider, model, extendedContext } = modelInfo;
+  const requestedTargetFormat =
+    typeof modelInfo?.targetFormat === "string" &&
+    modelInfo.targetFormat === FORMATS.OPENAI_RESPONSES
+      ? modelInfo.targetFormat
+      : null;
   const requestedModel =
     typeof body?.model === "string" && body.model.trim().length > 0 ? body.model : model;
   const startTime = Date.now();
@@ -683,7 +757,9 @@ export async function handleChatCore({
   const alias = PROVIDER_ID_TO_ALIAS[provider] || provider;
   const modelTargetFormat = getModelTargetFormat(alias, resolvedModel);
   const targetFormat =
-    modelTargetFormat || getTargetFormat(provider, credentials?.providerSpecificData);
+    requestedTargetFormat ||
+    modelTargetFormat ||
+    getTargetFormat(provider, credentials?.providerSpecificData);
   const noLogEnabled = apiKeyInfo?.noLog === true;
   const detailedLoggingEnabled = !noLogEnabled && (await isDetailedLoggingEnabled());
   const skillRequestId = generateRequestId();
@@ -1370,13 +1446,18 @@ export async function handleChatCore({
     const nextCredentials = nativeCodexPassthrough
       ? { ...credentials, requestEndpointPath: endpointPath }
       : credentials;
+    const formatCredentials = withOpenAICompatibleApiTypeForTargetFormat(
+      nextCredentials,
+      provider,
+      targetFormat
+    );
 
-    if (!ccSessionId) return nextCredentials;
+    if (!ccSessionId) return formatCredentials;
 
     return {
-      ...nextCredentials,
+      ...formatCredentials,
       providerSpecificData: {
-        ...(nextCredentials?.providerSpecificData || {}),
+        ...(formatCredentials?.providerSpecificData || {}),
         ccSessionId,
       },
     };
@@ -1821,7 +1902,7 @@ export async function handleChatCore({
     // from the same family. This keeps the request alive on the same account
     // instead of failing the entire combo.
     if (isModelUnavailableError(statusCode, message)) {
-      const nextModel = getNextFamilyFallback(currentModel, triedModels);
+      const nextModel = getNextFamilyFallback(currentModel, triedModels, provider, targetFormat);
       if (nextModel) {
         triedModels.add(nextModel);
         currentModel = nextModel;
@@ -1831,6 +1912,7 @@ export async function handleChatCore({
         try {
           const fallbackResult = await executeProviderRequest(nextModel, false);
           if (fallbackResult.response.ok) {
+            model = nextModel;
             providerResponse = fallbackResult.response;
             providerUrl = fallbackResult.url;
             providerHeaders = fallbackResult.headers;
@@ -1879,8 +1961,12 @@ export async function handleChatCore({
         (m) => m !== currentModel && !triedModels.has(m)
       );
       const nextModel =
-        findLargerContextModel(currentModel, familyCandidates) ??
-        getNextFamilyFallback(currentModel, triedModels);
+        findLargerContextModel(
+          currentModel,
+          familyCandidates,
+          provider || undefined,
+          targetFormat
+        ) ?? getNextFamilyFallback(currentModel, triedModels, provider, targetFormat);
       if (nextModel) {
         triedModels.add(nextModel);
         currentModel = nextModel;
@@ -1889,6 +1975,7 @@ export async function handleChatCore({
         try {
           const fallbackResult = await executeProviderRequest(nextModel, false);
           if (fallbackResult.response.ok) {
+            model = nextModel;
             providerResponse = fallbackResult.response;
             providerUrl = fallbackResult.url;
             providerHeaders = fallbackResult.headers;
@@ -2108,7 +2195,7 @@ export async function handleChatCore({
       persistFailureUsage(HTTP_STATUS.BAD_GATEWAY, "empty_content");
 
       // Trigger non-recursive fallback for empty content
-      const nextModel = getNextFamilyFallback(currentModel, triedModels);
+      const nextModel = getNextFamilyFallback(currentModel, triedModels, provider, targetFormat);
       if (nextModel) {
         triedModels.add(nextModel);
         currentModel = nextModel;
@@ -2120,6 +2207,7 @@ export async function handleChatCore({
         try {
           const fallbackResult = await executeProviderRequest(nextModel, false);
           if (fallbackResult.response.ok) {
+            model = nextModel;
             const fallbackRaw = await fallbackResult.response.text();
             try {
               responseBody = fallbackRaw ? JSON.parse(fallbackRaw) : {};
@@ -2449,6 +2537,10 @@ export async function handleChatCore({
   if (needsResponsesTranslation) {
     // Provider returns openai-responses, translate to openai (Chat Completions) that clients expect
     log?.debug?.("STREAM", `Responses translation mode: openai-responses → openai`);
+    const { sseDiagnosticsConfig } = await resolveStreamCompatibilitySettings(
+      provider,
+      forwardingLane as TrustedForwardingLane
+    );
     transformStream = createSSETransformStreamWithLogger(
       "openai-responses",
       "openai",
@@ -2459,30 +2551,17 @@ export async function handleChatCore({
       connectionId,
       body,
       onStreamComplete,
-      apiKeyInfo
+      apiKeyInfo,
+      "stream-normalized",
+      null,
+      sseDiagnosticsConfig
     );
   } else if (needsTranslation(targetFormat, clientResponseFormat)) {
     log?.debug?.("STREAM", `Translation mode: ${targetFormat} → ${clientResponseFormat}`);
-    const { resolveToolArgumentMode } = await import("../translator/helpers/toolArgumentMode.ts");
-    const { getCachedSettings } = await import("@/lib/db/readCache");
-    const { sseDiagnosticsSettingsSchema, SSE_DIAGNOSTICS_DEFAULT } =
-      await import("@/shared/validation/settingsSchemas");
-    const settings = await getCachedSettings().catch(() => ({}));
-    const toolArgumentMode = resolveToolArgumentMode(
-      (settings as { toolArgumentMode?: unknown })?.toolArgumentMode as
-        | Parameters<typeof resolveToolArgumentMode>[0]
-        | undefined,
+    const { toolArgumentMode, sseDiagnosticsConfig } = await resolveStreamCompatibilitySettings(
       provider,
-      forwardingLane as "claude-oauth-prefixed" | null
+      forwardingLane as TrustedForwardingLane
     );
-    const rawSseDiagnostics = (settings as { sseDiagnostics?: unknown }).sseDiagnostics;
-    const parsedSseDiagnostics = sseDiagnosticsSettingsSchema.safeParse({
-      ...SSE_DIAGNOSTICS_DEFAULT,
-      ...(rawSseDiagnostics && typeof rawSseDiagnostics === "object" ? rawSseDiagnostics : {}),
-    });
-    const sseDiagnosticsConfig = parsedSseDiagnostics.success
-      ? parsedSseDiagnostics.data
-      : SSE_DIAGNOSTICS_DEFAULT;
     transformStream = createSSETransformStreamWithLogger(
       targetFormat,
       clientResponseFormat,

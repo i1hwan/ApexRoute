@@ -217,6 +217,14 @@ describe("modelsDevSync — transformModelsDevToPricing", () => {
     assert.equal(pricing.openai["o3-mini"].cache_creation, undefined);
   });
 
+  it("maps Anthropic models.dev data to Claude OAuth provider keys", () => {
+    const pricing = transformModelsDevToPricing(MOCK_MODELS_DEV_DATA);
+
+    assert.equal(pricing.anthropic["claude-sonnet-4-20250514"].input, 3.0);
+    assert.equal(pricing.claude["claude-sonnet-4-20250514"].input, 3.0);
+    assert.equal(pricing.cc["claude-sonnet-4-20250514"].cache_creation, 3.75);
+  });
+
   it("maps deepseek to both deepseek and if (Qoder) providers", () => {
     const pricing = transformModelsDevToPricing(MOCK_MODELS_DEV_DATA);
 
@@ -269,10 +277,10 @@ describe("modelsDevSync — transformModelsDevToPricing", () => {
       0
     );
     // openai: 2 models × 2 providers (openai, cx) = 4
-    // anthropic: 1 model × 2 providers (anthropic, cc) = 2
+    // anthropic: 1 model × 3 providers (anthropic, claude, cc) = 3
     // deepseek: 1 model × 2 providers (deepseek, if) = 2
     // unknown-provider: 1 model × 1 provider = 1
-    assert.equal(totalModels, 9);
+    assert.equal(totalModels, 10);
   });
 });
 
@@ -296,6 +304,13 @@ describe("modelsDevSync — transformModelsDevToCapabilities", () => {
     assert.equal(gpt4o.open_weights, false);
     assert.equal(JSON.parse(gpt4o.modalities_input).length, 2);
     assert.equal(JSON.parse(gpt4o.modalities_output).length, 1);
+  });
+
+  it("maps Anthropic capabilities to Claude OAuth provider keys", () => {
+    const caps = transformModelsDevToCapabilities(MOCK_MODELS_DEV_DATA);
+
+    assert.equal(caps.claude["claude-sonnet-4-20250514"].limit_context, 200000);
+    assert.equal(caps.cc["claude-sonnet-4-20250514"].tool_call, true);
   });
 
   it("handles interleaved reasoning field", () => {
@@ -389,8 +404,8 @@ describe("modelsDevSync — mapProviderId", () => {
     assert.deepEqual(mapProviderId("openai"), ["openai", "cx"]);
   });
 
-  it("maps anthropic to [anthropic, cc]", () => {
-    assert.deepEqual(mapProviderId("anthropic"), ["anthropic", "cc"]);
+  it("maps anthropic to [anthropic, claude, cc]", () => {
+    assert.deepEqual(mapProviderId("anthropic"), ["anthropic", "claude", "cc"]);
   });
 
   it("maps google to [gemini, gemini-cli]", () => {

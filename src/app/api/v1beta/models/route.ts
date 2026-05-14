@@ -2,6 +2,22 @@ import { CORS_ORIGIN } from "@/shared/utils/cors";
 import { PROVIDER_MODELS } from "@/shared/constants/models";
 import { getAllCustomModels, getSyncedAvailableModels } from "@/lib/db/models";
 
+function getInputTokenLimit(model: Record<string, unknown>, fallback = 128000) {
+  return typeof model.inputTokenLimit === "number"
+    ? model.inputTokenLimit
+    : typeof model.contextLength === "number"
+      ? model.contextLength
+      : fallback;
+}
+
+function getOutputTokenLimit(model: Record<string, unknown>, fallback = 8192) {
+  return typeof model.outputTokenLimit === "number"
+    ? model.outputTokenLimit
+    : typeof model.maxOutputTokens === "number"
+      ? model.maxOutputTokens
+      : fallback;
+}
+
 /**
  * Handle CORS preflight
  */
@@ -31,8 +47,8 @@ export async function GET() {
           displayName: model.name || model.id,
           description: `${provider} model: ${model.name || model.id}`,
           supportedGenerationMethods: ["generateContent"],
-          inputTokenLimit: 128000,
-          outputTokenLimit: 8192,
+          inputTokenLimit: getInputTokenLimit(model as Record<string, unknown>),
+          outputTokenLimit: getOutputTokenLimit(model as Record<string, unknown>),
         });
       }
     }
@@ -55,8 +71,8 @@ export async function GET() {
           displayName: m.name || m.id,
           ...(typeof m.description === "string" ? { description: m.description } : {}),
           supportedGenerationMethods: ["generateContent"],
-          inputTokenLimit: typeof m.inputTokenLimit === "number" ? m.inputTokenLimit : 128000,
-          outputTokenLimit: typeof m.outputTokenLimit === "number" ? m.outputTokenLimit : 8192,
+          inputTokenLimit: getInputTokenLimit(m as Record<string, unknown>),
+          outputTokenLimit: getOutputTokenLimit(m as Record<string, unknown>),
           ...(m.supportsThinking === true ? { thinking: true } : {}),
         });
       }
@@ -81,8 +97,8 @@ export async function GET() {
             displayName: m.name || m.id,
             ...(typeof m.description === "string" ? { description: m.description } : {}),
             supportedGenerationMethods: ["generateContent"],
-            inputTokenLimit: typeof m.inputTokenLimit === "number" ? m.inputTokenLimit : 128000,
-            outputTokenLimit: typeof m.outputTokenLimit === "number" ? m.outputTokenLimit : 8192,
+            inputTokenLimit: getInputTokenLimit(m),
+            outputTokenLimit: getOutputTokenLimit(m),
             ...(m.supportsThinking === true ? { thinking: true } : {}),
           });
         }

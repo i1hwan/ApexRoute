@@ -1,4 +1,5 @@
 import { PROVIDER_ID_TO_ALIAS, PROVIDER_MODELS } from "../config/providerModels.ts";
+import { getModelSpec } from "../../src/shared/constants/modelSpecs";
 import { parseModel } from "./model.ts";
 
 // Conservative denylist fallback used when registry metadata is absent.
@@ -40,8 +41,12 @@ export function supportsToolCalling(modelStr: string): boolean {
     if (normalized.endsWith(`/${pattern}`)) return true;
     return normalized.includes(pattern);
   });
+  if (blocked) return false;
 
-  return !blocked;
+  const spec = getModelSpec(model);
+  if (typeof spec?.supportsTools === "boolean") return spec.supportsTools;
+
+  return true;
 }
 
 // Models that do NOT support reasoning/thinking parameters.
@@ -87,6 +92,10 @@ export function supportsReasoning(modelStr: string): boolean {
     (pattern) =>
       normalized === pattern || normalized.endsWith(`/${pattern}`) || normalized.includes(pattern)
   );
+  if (blocked) return false;
 
-  return !blocked;
+  const spec = getModelSpec(model);
+  if (typeof spec?.supportsThinking === "boolean") return spec.supportsThinking;
+
+  return true;
 }

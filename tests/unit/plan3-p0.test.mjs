@@ -34,6 +34,48 @@ test("getModelInfoCore resolves gpt-5.4 to codex", async () => {
   assert.equal(info.model, "gpt-5.4");
 });
 
+test("getModelInfoCore gives exact bare model ownership priority over provider legacy aliases", async () => {
+  const info = await getModelInfoCore("gemini-3-flash", {});
+  assert.equal(info.provider, "antigravity");
+  assert.equal(info.model, "gemini-3-flash");
+});
+
+test("getModelInfoCore ignores provider legacy aliases that target unregistered models", async () => {
+  const info = await getModelInfoCore("gh/gemini-3-flash", {});
+  assert.equal(info.provider, "github");
+  assert.equal(info.model, "gemini-3-flash");
+});
+
+test("getModelInfoCore resolves current Apex bare GPT-5 models without ambiguity", async () => {
+  const gpt55 = await getModelInfoCore("gpt-5.5", {});
+  assert.equal(gpt55.provider, "codex");
+  assert.equal(gpt55.model, "gpt-5.5");
+
+  const spark = await getModelInfoCore("gpt-5.3-codex-spark", {});
+  assert.equal(spark.provider, "codex");
+  assert.equal(spark.model, "gpt-5.3-codex-spark");
+
+  const codex52 = await getModelInfoCore("gpt-5.2-codex", {});
+  assert.equal(codex52.provider, "codex");
+  assert.equal(codex52.model, "gpt-5.2-codex");
+
+  const gpt5 = await getModelInfoCore("gpt-5", {});
+  assert.equal(gpt5.provider, "openai");
+  assert.equal(gpt5.model, "gpt-5");
+
+  const gpt5Mini = await getModelInfoCore("gpt-5-mini", {});
+  assert.equal(gpt5Mini.provider, "openai");
+  assert.equal(gpt5Mini.model, "gpt-5-mini");
+
+  const gpt5Nano = await getModelInfoCore("gpt-5-nano", {});
+  assert.equal(gpt5Nano.provider, "openai");
+  assert.equal(gpt5Nano.model, "gpt-5-nano");
+
+  const gpt53Chat = await getModelInfoCore("gpt-5.3-chat-latest", {});
+  assert.equal(gpt53Chat.provider, "openai");
+  assert.equal(gpt53Chat.model, "gpt-5.3-chat-latest");
+});
+
 test("getModelInfoCore returns explicit ambiguity metadata for ambiguous unprefixed model", async () => {
   const info = await getModelInfoCore("claude-haiku-4.5", {});
   assert.equal(info.provider, null);
@@ -43,10 +85,20 @@ test("getModelInfoCore returns explicit ambiguity metadata for ambiguous unprefi
   assert.ok(info.candidateProviders.length >= 2);
 });
 
-test("getModelInfoCore canonicalizes github legacy alias with explicit provider prefix", async () => {
+test("getModelInfoCore routes bare Opus 4.7 to Anthropic while preserving explicit Claude OAuth", async () => {
+  const bare = await getModelInfoCore("claude-opus-4-7", {});
+  assert.equal(bare.provider, "anthropic");
+  assert.equal(bare.model, "claude-opus-4-7");
+
+  const oauth = await getModelInfoCore("cc/claude-opus-4-7", {});
+  assert.equal(oauth.provider, "claude");
+  assert.equal(oauth.model, "claude-opus-4-7");
+});
+
+test("getModelInfoCore upgrades github legacy Opus 4.5 alias with explicit provider prefix", async () => {
   const info = await getModelInfoCore("gh/claude-4.5-opus", {});
   assert.equal(info.provider, "github");
-  assert.equal(info.model, "claude-opus-4-5-20251101");
+  assert.equal(info.model, "claude-opus-4.6");
 });
 
 test("GithubExecutor routes codex-family model to /responses", () => {

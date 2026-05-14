@@ -5,8 +5,10 @@
  * 3 layers: trim tool messages, compress thinking, aggressive purification.
  */
 
-import { REGISTRY } from "../config/providerRegistry.ts";
+import { REGISTRY, type RegistryEntry } from "../config/providerRegistry.ts";
+import { resolveProviderModelAlias } from "./model.ts";
 import { getModelContextLimit } from "../../src/lib/modelsDevSync";
+import { getModelSpec } from "../../src/shared/constants/modelSpecs";
 
 // Default token limits per provider (fallbacks when not in registry)
 const DEFAULT_LIMITS: Record<string, number> = {
@@ -34,6 +36,22 @@ function getEnvOverride(provider: string): number | null {
   return null;
 }
 
+function getRegistryEntry(provider: string | null | undefined): RegistryEntry | null {
+  if (!provider) return null;
+  return (
+    REGISTRY[provider] ||
+    Object.values(REGISTRY).find((entry) => entry.id === provider || entry.alias === provider) ||
+    null
+  );
+}
+
+function getProviderLookupKeys(provider: string, registryEntry: RegistryEntry | null): string[] {
+  const keys = [provider, registryEntry?.id, registryEntry?.alias].filter(
+    (key): key is string => typeof key === "string" && key.length > 0
+  );
+  return [...new Set(keys)];
+}
+
 // Rough chars-per-token ratio for quick estimation
 const CHARS_PER_TOKEN = 4;
 
@@ -48,28 +66,50 @@ export function estimateTokens(text) {
 
 /**
  * Get token limit for a provider/model combination
- * Priority: Env override > models.dev DB > Registry defaultContextLength > DEFAULT_LIMITS
+ * Priority: Env override > Registry model > models.dev DB > modelSpecs > Registry defaultContextLength > DEFAULT_LIMITS
  */
 export function getTokenLimit(provider, model = null) {
   // 1. Check environment variable override first
   const envOverride = getEnvOverride(provider);
   if (envOverride) return envOverride;
 
-  // 2. Check models.dev synced DB for per-model context limit
-  if (model) {
-    const dbLimit = getModelContextLimit(provider, model);
-    if (dbLimit && dbLimit > 0) return dbLimit;
+  const registryEntry = getRegistryEntry(provider);
+  const providerId = registryEntry?.id || provider;
+  const canonicalModel = model ? resolveProviderModelAlias(providerId, model) : model;
+
+  // 2. Check registry for provider-scoped per-model context limit.
+  // Registry entries are the safety override for OAuth providers whose limits can
+  // differ from the public API values synced from models.dev.
+  if (canonicalModel && registryEntry?.models) {
+    const registryModel = registryEntry.models.find((entry) => entry.id === canonicalModel);
+    if (registryModel?.contextLength && registryModel.contextLength > 0) {
+      return registryModel.contextLength;
+    }
   }
 
-  // 3. Check registry for provider default
-  const registryEntry = REGISTRY[provider];
+  // 3. Check models.dev synced DB for per-model context limit.
+  // Try both provider IDs and aliases so cx/codex, cc/claude, etc. stay coherent.
+  if (canonicalModel) {
+    for (const key of getProviderLookupKeys(provider, registryEntry)) {
+      const dbLimit = getModelContextLimit(key, canonicalModel);
+      if (dbLimit && dbLimit > 0) return dbLimit;
+    }
+  }
+
+  // 4. Check static model specs for current models when the optional sync DB is empty.
+  if (canonicalModel) {
+    const specLimit = getModelSpec(canonicalModel)?.contextWindow;
+    if (specLimit && specLimit > 0) return specLimit;
+  }
+
+  // 5. Check registry for provider default
   if (registryEntry?.defaultContextLength) {
     return registryEntry.defaultContextLength;
   }
 
-  // 4. Check if model name hints at a known limit
-  if (model) {
-    const lower = model.toLowerCase();
+  // 6. Check if model name hints at a known limit
+  if (canonicalModel) {
+    const lower = canonicalModel.toLowerCase();
     if (lower.includes("claude")) return DEFAULT_LIMITS.claude;
     if (lower.includes("gemini")) return DEFAULT_LIMITS.gemini;
     if (
@@ -82,7 +122,7 @@ export function getTokenLimit(provider, model = null) {
       return DEFAULT_LIMITS.codex;
   }
 
-  // 5. Fallback to DEFAULT_LIMITS or default
+  // 7. Fallback to DEFAULT_LIMITS or default
   return DEFAULT_LIMITS[provider] || DEFAULT_LIMITS.default;
 }
 

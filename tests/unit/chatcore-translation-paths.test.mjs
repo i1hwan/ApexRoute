@@ -24,6 +24,7 @@ const {
   resetStats: resetBackgroundStats,
 } = await import("../../open-sse/services/backgroundTaskDetector.ts");
 const { getCallLogs, getCallLogById } = await import("../../src/lib/usage/callLogs.ts");
+const costRules = await import("../../src/domain/costRules.ts");
 const {
   handleChatCore,
   shouldUseNativeCodexPassthrough,
@@ -237,6 +238,7 @@ async function resetStorage() {
   clearIdempotency();
   clearInflight();
   clearModelsDevCapabilities();
+  costRules.resetCostData();
   setBackgroundDegradationConfig(originalBackgroundConfig);
   resetBackgroundStats();
   globalThis.setTimeout = originalSetTimeout;
@@ -283,6 +285,7 @@ async function invokeChatCore({
   connectionId = null,
   onCredentialsRefreshed = null,
   onRequestSuccess = null,
+  modelInfo = null,
 } = {}) {
   const calls = [];
 
@@ -312,7 +315,7 @@ async function invokeChatCore({
     const requestBody = structuredClone(body);
     const result = await handleChatCore({
       body: requestBody,
-      modelInfo: { provider, model, extendedContext: false },
+      modelInfo: modelInfo || { provider, model, extendedContext: false },
       credentials: credentials || {
         apiKey: "sk-test",
         providerSpecificData: {},
@@ -406,6 +409,102 @@ test("chatCore honors providerSpecificData.apiType for legacy openai-compatible 
   assert.ok(call.body.input);
   assert.equal("messages" in call.body, false);
   assert.equal(payload.choices[0].message.content, "ok");
+});
+
+test("chatCore ignores stale chat targetFormat when credentials require OpenAI Responses", async () => {
+  const { call, result } = await invokeChatCore({
+    provider: "openai-compatible-sp-openai",
+    model: "gpt-5.4",
+    endpoint: "/v1/chat/completions",
+    credentials: {
+      apiKey: "sk-test",
+      providerSpecificData: {
+        apiType: "responses",
+        baseUrl: "https://proxy.example.com/v1",
+        prefix: "sp-openai",
+      },
+    },
+    modelInfo: {
+      provider: "openai-compatible-sp-openai",
+      model: "gpt-5.4",
+      extendedContext: false,
+      targetFormat: FORMATS.OPENAI,
+    },
+    body: {
+      model: "sp/gpt-5.4",
+      stream: false,
+      messages: [{ role: "user", content: "Reply with OK only." }],
+      max_tokens: 64,
+    },
+    responseFormat: "openai-responses",
+  });
+
+  const payload = await result.response.json();
+  assert.equal(result.success, true);
+  assert.match(call.url, /\/responses$/);
+  assert.ok(call.body.input);
+  assert.equal("messages" in call.body, false);
+  assert.equal(payload.choices[0].message.content, "ok");
+});
+
+test("chatCore honors resolved targetFormat for custom OpenAI-compatible response models", async () => {
+  const { call, result } = await invokeChatCore({
+    provider: "openai-compatible-custom",
+    model: "edge-responses",
+    endpoint: "/v1/chat/completions",
+    credentials: {
+      apiKey: "sk-test",
+      providerSpecificData: {
+        baseUrl: "https://proxy.example.com/v1",
+        prefix: "edge",
+      },
+    },
+    modelInfo: {
+      provider: "openai-compatible-custom",
+      model: "edge-responses",
+      extendedContext: false,
+      targetFormat: FORMATS.OPENAI_RESPONSES,
+    },
+    body: {
+      model: "edge/edge-responses",
+      stream: false,
+      messages: [{ role: "user", content: "Reply with OK only." }],
+      max_tokens: 64,
+    },
+    responseFormat: "openai-responses",
+  });
+
+  const payload = await result.response.json();
+  assert.equal(result.success, true);
+  assert.match(call.url, /\/responses$/);
+  assert.ok(call.body.input);
+  assert.equal("messages" in call.body, false);
+  assert.equal(payload.choices[0].message.content, "ok");
+});
+
+test("chatCore routes OpenAI Codex-family models through Responses API", async () => {
+  for (const model of ["gpt-5-codex", "gpt-5.2-codex", "gpt-5.3-codex-spark"]) {
+    const { call, result } = await invokeChatCore({
+      provider: "openai",
+      model,
+      endpoint: "/v1/chat/completions",
+      body: {
+        model,
+        stream: false,
+        messages: [{ role: "user", content: "Reply with OK only." }],
+        max_tokens: 64,
+      },
+      responseFormat: "openai-responses",
+    });
+
+    const payload = await result.response.json();
+    assert.equal(result.success, true);
+    assert.match(call.url, /\/responses$/);
+    assert.equal(call.body.model, model);
+    assert.ok(call.body.input);
+    assert.equal("messages" in call.body, false);
+    assert.equal(payload.choices[0].message.content, "ok");
+  }
 });
 
 test("chatCore helper exports detect responses passthrough paths and token expiry windows", () => {
@@ -1464,19 +1563,71 @@ test("chatCore falls back to the next family model when the requested model is u
   const payload = await result.response.json();
   assert.equal(result.success, true);
   assert.equal(calls.length, 2);
-  assert.equal(calls[1].body.model, "gpt-5.1-mini");
+  assert.equal(calls[1].body.model, "gpt-5");
   assert.equal(payload.choices[0].message.content, "family fallback ok");
 });
 
-test("chatCore falls back to a larger-context sibling when the request overflows context", async () => {
-  saveModelsDevCapabilities({
-    unknown: {
-      "gpt-5": capabilityEntry(128_000),
-      "gpt-5-mini": capabilityEntry(64_000),
-      "gpt-4o": capabilityEntry(256_000),
+test("chatCore Codex model-unavailable fallback skips same-wire effort aliases", async () => {
+  const { calls, result } = await invokeChatCore({
+    provider: "codex",
+    model: "gpt-5.5",
+    credentials: { accessToken: "codex-token", providerSpecificData: {} },
+    body: {
+      model: "cx/gpt-5.5",
+      stream: false,
+      messages: [{ role: "user", content: "fallback past same-wire effort aliases" }],
+    },
+    responseFactory(_captured, seenCalls) {
+      if (seenCalls.length === 1) {
+        return new Response(JSON.stringify({ detail: "model not found" }), {
+          status: 404,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return buildResponsesResponse("codex fallback ok");
     },
   });
 
+  const payload = await result.response.json();
+  assert.equal(result.success, true);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].body.model, "gpt-5.5");
+  assert.equal(calls[1].body.model, "gpt-5.5-pro");
+  assert.equal(payload.choices[0].message.content, "codex fallback ok");
+});
+
+test("chatCore records successful model fallback cost under the served fallback model", async () => {
+  const { calls, result } = await invokeChatCore({
+    provider: "openai",
+    model: "gpt-5.5",
+    apiKeyInfo: { id: "fallback-cost-key", name: "fallback cost key" },
+    body: {
+      model: "gpt-5.5",
+      stream: false,
+      messages: [{ role: "user", content: "fallback cost accounting" }],
+    },
+    responseFactory(_captured, seenCalls) {
+      if (seenCalls.length === 1) {
+        return new Response(JSON.stringify({ error: { message: "model not found" } }), {
+          status: 404,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return buildOpenAIResponse(false, "fallback cost ok");
+    },
+  });
+
+  const payload = await result.response.json();
+  assert.equal(result.success, true);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].body.model, "gpt-5.5-pro");
+  assert.equal(payload.choices[0].message.content, "fallback cost ok");
+
+  const total = costRules.getDailyTotal("fallback-cost-key");
+  assert.equal(total, 0.00048);
+});
+
+test("chatCore falls back within the OpenAI family when no larger context sibling is available", async () => {
   const { calls, result } = await invokeChatCore({
     provider: "openai",
     model: "gpt-5",
@@ -1499,8 +1650,38 @@ test("chatCore falls back to a larger-context sibling when the request overflows
   const payload = await result.response.json();
   assert.equal(result.success, true);
   assert.equal(calls.length, 2);
-  assert.equal(calls[1].body.model, "gpt-4o");
+  assert.equal(calls[1].body.model, "gpt-5-mini");
   assert.equal(payload.choices[0].message.content, "larger context fallback");
+});
+
+test("chatCore uses OpenAI registry caps for GPT Spark context-overflow fallback", async () => {
+  const { calls, result } = await invokeChatCore({
+    provider: "openai",
+    model: "gpt-5.3-codex-spark",
+    body: {
+      model: "openai/gpt-5.3-codex-spark",
+      stream: false,
+      messages: [{ role: "user", content: "recover from openai spark overflow" }],
+    },
+    responseFactory(_captured, seenCalls) {
+      if (seenCalls.length === 1) {
+        return new Response(JSON.stringify({ error: { message: "maximum context exceeded" } }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return buildResponsesResponse("openai larger context fallback");
+    },
+  });
+
+  const payload = await result.response.json();
+  assert.equal(result.success, true);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].url, "https://api.openai.com/v1/responses");
+  assert.equal(calls[1].body.model, "gpt-5.3-codex");
+  assert.ok(calls[1].body.input);
+  assert.equal(calls[1].body.messages, undefined);
+  assert.equal(payload.choices[0].message.content, "openai larger context fallback");
 });
 
 test("chatCore parses upstream SSE payloads for non-streaming requests", async () => {
@@ -1603,7 +1784,7 @@ test("chatCore falls back after an empty-content success response", async () => 
   const payload = await result.response.json();
   assert.equal(result.success, true);
   assert.equal(calls.length, 2);
-  assert.equal(calls[1].body.model, "gpt-5.1-mini");
+  assert.equal(calls[1].body.model, "gpt-5");
   assert.equal(payload.choices[0].message.content, "empty-content fallback ok");
 });
 
@@ -1649,7 +1830,7 @@ test("chatCore returns a gateway error when the empty-content fallback responds 
   assert.equal(result.status, 502);
   assert.equal(result.error, "Provider returned empty content");
   assert.equal(calls.length, 2);
-  assert.equal(calls[1].body.model, "gpt-5.1-mini");
+  assert.equal(calls[1].body.model, "gpt-5");
 });
 
 test("chatCore records Claude prompt cache and cache usage metadata in call logs", async () => {

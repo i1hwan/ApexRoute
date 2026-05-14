@@ -51,6 +51,6 @@ test("forwardingLane extraction requires both a real Map and a whitelisted lane"
   );
   assert.match(
     source,
-    /import\s*\{\s*isValidForwardingLane\s*\}\s*from\s+["']\.\.\/translator\/helpers\/toolArgumentMode\.ts["']/
+    /import\s*\{[\s\S]*?isValidForwardingLane[\s\S]*?\}\s*from\s+["']\.\.\/translator\/helpers\/toolArgumentMode\.ts["']/
   );
 });

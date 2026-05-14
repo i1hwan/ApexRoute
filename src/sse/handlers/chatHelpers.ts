@@ -2,10 +2,7 @@ import { getModelInfo } from "../services/model";
 import { clearAccountError } from "../services/auth";
 import * as log from "../utils/logger";
 import { updateProviderCredentials } from "../services/tokenRefresh";
-import {
-  detectFormatFromEndpoint,
-  getTargetFormat,
-} from "@omniroute/open-sse/services/provider.ts";
+import { detectFormatFromEndpoint } from "@omniroute/open-sse/services/provider.ts";
 import {
   getModelTargetFormat,
   PROVIDER_ID_TO_ALIAS,
@@ -45,7 +42,8 @@ export async function resolveModelOrError(modelStr: string, body: any, endpointP
   const { provider, model, extendedContext } = modelInfo;
   const sourceFormat = detectFormatFromEndpoint(body, endpointPath);
   const providerAlias = PROVIDER_ID_TO_ALIAS[provider] || provider;
-  let targetFormat = getModelTargetFormat(providerAlias, model) || getTargetFormat(provider);
+  const modelTargetFormat = getModelTargetFormat(providerAlias, model);
+  let targetFormat = modelTargetFormat || undefined;
   if ((modelInfo as any).apiFormat === "responses") {
     targetFormat = "openai-responses";
     log.info("ROUTING", `Custom model apiFormat=responses → targetFormat=openai-responses`);
@@ -115,6 +113,7 @@ export async function executeChatWithBreaker({
   comboStrategy,
   isCombo,
   extendedContext,
+  targetFormat,
 }: any): Promise<{ result: any; tlsFingerprintUsed: boolean }> {
   let tlsFingerprintUsed = false;
 
@@ -123,7 +122,7 @@ export async function executeChatWithBreaker({
       runWithProxyContext(proxyInfo?.proxy || null, () =>
         (handleChatCore as any)({
           body: { ...body, model: `${provider}/${model}` },
-          modelInfo: { provider, model, extendedContext },
+          modelInfo: { provider, model, extendedContext, targetFormat },
           credentials: refreshedCredentials,
           log: handlerLog,
           clientRawRequest,

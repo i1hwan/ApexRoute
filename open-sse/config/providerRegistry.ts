@@ -7,6 +7,7 @@
  */
 
 import { platform, arch } from "os";
+import { getCodexDefaultHeaders } from "./codexClient.ts";
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -14,10 +15,15 @@ export interface RegistryModel {
   id: string;
   name: string;
   toolCalling?: boolean;
+  supportsReasoning?: boolean;
+  supportsVision?: boolean;
+  supportsXHighEffort?: boolean;
   targetFormat?: string;
   unsupportedParams?: readonly string[];
   /** Maximum context window in tokens */
   contextLength?: number;
+  /** Maximum output tokens */
+  maxOutputTokens?: number;
 }
 
 // Reasoning models reject temperature, top_p, penalties, logprobs, n.
@@ -31,6 +37,118 @@ const REASONING_UNSUPPORTED: readonly string[] = Object.freeze([
   "top_logprobs",
   "n",
 ]);
+
+const GPT_5_LONG_CONTEXT_LENGTH = 1050000;
+const GPT_5_CODEX_CONTEXT_LENGTH = 400000;
+const GPT_5_CODEX_SPARK_CONTEXT_LENGTH = 128000;
+const GPT_5_MAX_OUTPUT_TOKENS = 128000;
+const GPT_5_PRO_MAX_OUTPUT_TOKENS = 272000;
+const GPT_5_CODEX_SPARK_MAX_OUTPUT_TOKENS = 32000;
+const GPT_5_CHAT_LATEST_CONTEXT_LENGTH = 128000;
+const GPT_5_CHAT_LATEST_MAX_OUTPUT_TOKENS = 16384;
+const CLAUDE_1M_CONTEXT_LENGTH = 1000000;
+const CLAUDE_OPUS_MAX_OUTPUT_TOKENS = 128000;
+
+const GPT_5_REASONING_CAPABILITIES = {
+  targetFormat: "openai-responses",
+  toolCalling: true,
+  supportsReasoning: true,
+  supportsVision: true,
+  supportsXHighEffort: true,
+} as const;
+
+const GPT_5_LONG_CONTEXT_CAPABILITIES = {
+  ...GPT_5_REASONING_CAPABILITIES,
+  contextLength: GPT_5_LONG_CONTEXT_LENGTH,
+  maxOutputTokens: GPT_5_MAX_OUTPUT_TOKENS,
+} as const;
+
+const GPT_5_OPENAI_CHAT_CAPABILITIES = {
+  toolCalling: true,
+  supportsReasoning: true,
+  supportsVision: true,
+  supportsXHighEffort: true,
+} as const;
+
+const GPT_5_OPENAI_LONG_CONTEXT_CAPABILITIES = {
+  ...GPT_5_OPENAI_CHAT_CAPABILITIES,
+  contextLength: GPT_5_LONG_CONTEXT_LENGTH,
+  maxOutputTokens: GPT_5_MAX_OUTPUT_TOKENS,
+} as const;
+
+const GPT_5_OPENAI_CODEX_CAPABILITIES = {
+  ...GPT_5_OPENAI_CHAT_CAPABILITIES,
+  contextLength: GPT_5_CODEX_CONTEXT_LENGTH,
+  maxOutputTokens: GPT_5_MAX_OUTPUT_TOKENS,
+} as const;
+
+const GPT_5_OPENAI_CODEX_RESPONSES_CAPABILITIES = {
+  ...GPT_5_OPENAI_CODEX_CAPABILITIES,
+  targetFormat: "openai-responses",
+} as const;
+
+const GPT_5_OPENAI_CODEX_SPARK_CAPABILITIES = {
+  ...GPT_5_OPENAI_CHAT_CAPABILITIES,
+  contextLength: GPT_5_CODEX_SPARK_CONTEXT_LENGTH,
+  maxOutputTokens: GPT_5_CODEX_SPARK_MAX_OUTPUT_TOKENS,
+} as const;
+
+const GPT_5_OPENAI_CODEX_SPARK_RESPONSES_CAPABILITIES = {
+  ...GPT_5_OPENAI_CODEX_SPARK_CAPABILITIES,
+  targetFormat: "openai-responses",
+} as const;
+
+const GPT_5_OPENAI_PRO_CAPABILITIES = {
+  ...GPT_5_OPENAI_CHAT_CAPABILITIES,
+  contextLength: GPT_5_CODEX_CONTEXT_LENGTH,
+  maxOutputTokens: GPT_5_MAX_OUTPUT_TOKENS,
+} as const;
+
+const GPT_5_OPENAI_5_PRO_CAPABILITIES = {
+  ...GPT_5_OPENAI_CHAT_CAPABILITIES,
+  contextLength: GPT_5_CODEX_CONTEXT_LENGTH,
+  maxOutputTokens: GPT_5_PRO_MAX_OUTPUT_TOKENS,
+} as const;
+
+const GPT_5_OPENAI_CHAT_LATEST_CAPABILITIES = {
+  toolCalling: true,
+  supportsReasoning: true,
+  supportsVision: true,
+  supportsXHighEffort: true,
+  contextLength: GPT_5_CHAT_LATEST_CONTEXT_LENGTH,
+  maxOutputTokens: GPT_5_CHAT_LATEST_MAX_OUTPUT_TOKENS,
+} as const;
+
+const GPT_5_3_OPENAI_CHAT_LATEST_CAPABILITIES = {
+  ...GPT_5_OPENAI_CHAT_LATEST_CAPABILITIES,
+  supportsReasoning: false,
+  supportsXHighEffort: false,
+} as const;
+
+const GPT_5_CODEX_CAPABILITIES = {
+  ...GPT_5_REASONING_CAPABILITIES,
+  contextLength: GPT_5_CODEX_CONTEXT_LENGTH,
+  maxOutputTokens: GPT_5_MAX_OUTPUT_TOKENS,
+} as const;
+
+const GPT_5_5_CODEX_OAUTH_CAPABILITIES = {
+  ...GPT_5_CODEX_CAPABILITIES,
+  maxOutputTokens: GPT_5_MAX_OUTPUT_TOKENS,
+} as const;
+
+const GPT_5_CODEX_SPARK_CAPABILITIES = {
+  ...GPT_5_REASONING_CAPABILITIES,
+  contextLength: GPT_5_CODEX_SPARK_CONTEXT_LENGTH,
+  maxOutputTokens: GPT_5_CODEX_SPARK_MAX_OUTPUT_TOKENS,
+} as const;
+
+const CLAUDE_OPUS_47_CAPABILITIES = {
+  toolCalling: true,
+  supportsReasoning: true,
+  supportsVision: true,
+  contextLength: CLAUDE_1M_CONTEXT_LENGTH,
+  maxOutputTokens: CLAUDE_OPUS_MAX_OUTPUT_TOKENS,
+} as const;
 
 export interface RegistryOAuth {
   clientIdEnv?: string;
@@ -165,10 +283,9 @@ export const REGISTRY: Record<string, RegistryEntry> = {
       tokenUrl: "https://console.anthropic.com/v1/oauth/token",
     },
     models: [
-      { id: "claude-opus-4-7", name: "Claude Opus 4.7" },
+      { id: "claude-opus-4-7", name: "Claude Opus 4.7", ...CLAUDE_OPUS_47_CAPABILITIES },
       { id: "claude-opus-4-6", name: "Claude Opus 4.6" },
       { id: "claude-sonnet-4-6", name: "Claude 4.6 Sonnet" },
-      { id: "claude-opus-4-5-20251101", name: "Claude 4.5 Opus" },
       { id: "claude-sonnet-4-5-20250929", name: "Claude 4.5 Sonnet" },
       { id: "claude-haiku-4-5-20251001", name: "Claude 4.5 Haiku" },
     ],
@@ -238,11 +355,7 @@ export const REGISTRY: Record<string, RegistryEntry> = {
     authType: "oauth",
     authHeader: "bearer",
     defaultContextLength: 400000,
-    headers: {
-      Version: "0.92.0",
-      "Openai-Beta": "responses=experimental",
-      "User-Agent": "codex-cli/0.92.0 (Windows 10.0.26100; x64)",
-    },
+    headers: getCodexDefaultHeaders(),
     oauth: {
       clientIdEnv: "CODEX_OAUTH_CLIENT_ID",
       clientIdDefault: "",
@@ -251,22 +364,66 @@ export const REGISTRY: Record<string, RegistryEntry> = {
       tokenUrl: "https://auth.openai.com/oauth/token",
     },
     models: [
-      { id: "gpt-5.4", name: "GPT 5.4", targetFormat: "openai-responses" },
-      { id: "gpt-5.4-mini", name: "GPT 5.4 Mini", targetFormat: "openai-responses" },
-      { id: "gpt-5.3-codex", name: "GPT 5.3 Codex" },
-      { id: "gpt-5.3-codex-xhigh", name: "GPT 5.3 Codex (xHigh)" },
-      { id: "gpt-5.3-codex-high", name: "GPT 5.3 Codex (High)" },
-      { id: "gpt-5.3-codex-low", name: "GPT 5.3 Codex (Low)" },
-      { id: "gpt-5.3-codex-none", name: "GPT 5.3 Codex (None)" },
-      { id: "gpt-5.1-codex-mini", name: "GPT 5.1 Codex Mini" },
-      { id: "gpt-5.1-codex-mini-high", name: "GPT 5.1 Codex Mini (High)" },
-      { id: "gpt-5.2-codex", name: "GPT 5.2 Codex" },
-      { id: "gpt-5.2", name: "GPT 5.2" },
-      { id: "gpt-5.1-codex-max", name: "GPT 5.1 Codex Max" },
-      { id: "gpt-5.1-codex", name: "GPT 5.1 Codex" },
-      { id: "gpt-5.1", name: "GPT 5.1" },
-      { id: "gpt-5-codex", name: "GPT 5 Codex" },
-      { id: "gpt-5-codex-mini", name: "GPT 5 Codex Mini" },
+      // Codex OAuth is capped below the public OpenAI API GPT-5.5 context.
+      // Keep this provider-specific so generic GPT-5.5 metadata can still
+      // represent the public API window where appropriate.
+      { id: "gpt-5.5", name: "GPT 5.5", ...GPT_5_5_CODEX_OAUTH_CAPABILITIES },
+      { id: "gpt-5.5-xhigh", name: "GPT 5.5 (xHigh)", ...GPT_5_5_CODEX_OAUTH_CAPABILITIES },
+      { id: "gpt-5.5-high", name: "GPT 5.5 (High)", ...GPT_5_5_CODEX_OAUTH_CAPABILITIES },
+      { id: "gpt-5.5-medium", name: "GPT 5.5 (Medium)", ...GPT_5_5_CODEX_OAUTH_CAPABILITIES },
+      { id: "gpt-5.5-low", name: "GPT 5.5 (Low)", ...GPT_5_5_CODEX_OAUTH_CAPABILITIES },
+      { id: "gpt-5.5-none", name: "GPT 5.5 (None)", ...GPT_5_5_CODEX_OAUTH_CAPABILITIES },
+      { id: "gpt-5.5-pro", name: "GPT 5.5 Pro", ...GPT_5_5_CODEX_OAUTH_CAPABILITIES },
+      // Current catalog reports GPT-5.4/pro with the full long-context window.
+      { id: "gpt-5.4", name: "GPT 5.4", ...GPT_5_LONG_CONTEXT_CAPABILITIES },
+      { id: "gpt-5.4-pro", name: "GPT 5.4 Pro", ...GPT_5_LONG_CONTEXT_CAPABILITIES },
+      { id: "gpt-5.4-mini", name: "GPT 5.4 Mini", ...GPT_5_CODEX_CAPABILITIES },
+      { id: "gpt-5.4-nano", name: "GPT 5.4 Nano", ...GPT_5_CODEX_CAPABILITIES },
+      { id: "gpt-5.3-codex", name: "GPT 5.3 Codex", ...GPT_5_CODEX_CAPABILITIES },
+      { id: "gpt-5.3-codex-xhigh", name: "GPT 5.3 Codex (xHigh)", ...GPT_5_CODEX_CAPABILITIES },
+      { id: "gpt-5.3-codex-high", name: "GPT 5.3 Codex (High)", ...GPT_5_CODEX_CAPABILITIES },
+      { id: "gpt-5.3-codex-medium", name: "GPT 5.3 Codex (Medium)", ...GPT_5_CODEX_CAPABILITIES },
+      { id: "gpt-5.3-codex-low", name: "GPT 5.3 Codex (Low)", ...GPT_5_CODEX_CAPABILITIES },
+      { id: "gpt-5.3-codex-none", name: "GPT 5.3 Codex (None)", ...GPT_5_CODEX_CAPABILITIES },
+      { id: "gpt-5.3-codex-spark", name: "GPT 5.3 Codex Spark", ...GPT_5_CODEX_SPARK_CAPABILITIES },
+      {
+        id: "gpt-5.3-codex-spark-xhigh",
+        name: "GPT 5.3 Codex Spark (xHigh)",
+        ...GPT_5_CODEX_SPARK_CAPABILITIES,
+      },
+      {
+        id: "gpt-5.3-codex-spark-high",
+        name: "GPT 5.3 Codex Spark (High)",
+        ...GPT_5_CODEX_SPARK_CAPABILITIES,
+      },
+      {
+        id: "gpt-5.3-codex-spark-medium",
+        name: "GPT 5.3 Codex Spark (Medium)",
+        ...GPT_5_CODEX_SPARK_CAPABILITIES,
+      },
+      {
+        id: "gpt-5.3-codex-spark-low",
+        name: "GPT 5.3 Codex Spark (Low)",
+        ...GPT_5_CODEX_SPARK_CAPABILITIES,
+      },
+      {
+        id: "gpt-5.3-codex-spark-none",
+        name: "GPT 5.3 Codex Spark (None)",
+        ...GPT_5_CODEX_SPARK_CAPABILITIES,
+      },
+      { id: "gpt-5.1-codex-mini", name: "GPT 5.1 Codex Mini", ...GPT_5_CODEX_CAPABILITIES },
+      {
+        id: "gpt-5.1-codex-mini-high",
+        name: "GPT 5.1 Codex Mini (High)",
+        ...GPT_5_CODEX_CAPABILITIES,
+      },
+      { id: "gpt-5.2-codex", name: "GPT 5.2 Codex", ...GPT_5_CODEX_CAPABILITIES },
+      { id: "gpt-5.2", name: "GPT 5.2", ...GPT_5_CODEX_CAPABILITIES },
+      { id: "gpt-5.1-codex-max", name: "GPT 5.1 Codex Max", ...GPT_5_CODEX_CAPABILITIES },
+      { id: "gpt-5.1-codex", name: "GPT 5.1 Codex", ...GPT_5_CODEX_CAPABILITIES },
+      { id: "gpt-5.1", name: "GPT 5.1", ...GPT_5_CODEX_CAPABILITIES },
+      { id: "gpt-5-codex", name: "GPT 5 Codex", ...GPT_5_CODEX_CAPABILITIES },
+      { id: "gpt-5-codex-mini", name: "GPT 5 Codex Mini", ...GPT_5_CODEX_CAPABILITIES },
     ],
   },
 
@@ -422,7 +579,6 @@ export const REGISTRY: Record<string, RegistryEntry> = {
       { id: "claude-haiku-4.5", name: "Claude Haiku 4.5" },
       { id: "claude-opus-4.1", name: "Claude Opus 4.1" },
       { id: "claude-opus-4.6", name: "Claude Opus 4.6" },
-      { id: "claude-opus-4-5-20251101", name: "Claude Opus 4.5 (Full ID)" },
       { id: "claude-sonnet-4", name: "Claude Sonnet 4" },
       { id: "claude-sonnet-4.5", name: "Claude Sonnet 4.5" },
       { id: "gemini-3.1-pro-preview", name: "Gemini 3.1 Pro Preview" },
@@ -484,12 +640,9 @@ export const REGISTRY: Record<string, RegistryEntry> = {
       { id: "claude-4.6-sonnet-high", name: "Claude 4.6 Sonnet High" },
       { id: "claude-4.6-haiku", name: "Claude 4.6 Haiku" },
       { id: "claude-4.6-opus", name: "Claude 4.6 Opus" },
-      { id: "claude-4.5-opus-high-thinking", name: "Claude 4.5 Opus High Thinking" },
-      { id: "claude-4.5-opus-high", name: "Claude 4.5 Opus High" },
       { id: "claude-4.5-sonnet-thinking", name: "Claude 4.5 Sonnet Thinking" },
       { id: "claude-4.5-sonnet", name: "Claude 4.5 Sonnet" },
       { id: "claude-4.5-haiku", name: "Claude 4.5 Haiku" },
-      { id: "claude-4.5-opus", name: "Claude 4.5 Opus" },
       { id: "gpt-5.2-codex", name: "GPT 5.2 Codex" },
     ],
   },
@@ -501,12 +654,65 @@ export const REGISTRY: Record<string, RegistryEntry> = {
     format: "openai",
     executor: "default",
     baseUrl: "https://api.openai.com/v1/chat/completions",
+    responsesBaseUrl: "https://api.openai.com/v1/responses",
     authType: "apikey",
     authHeader: "bearer",
     defaultContextLength: 128000,
     models: [
       { id: "gpt-4o", name: "GPT-4o" },
       { id: "gpt-4o-mini", name: "GPT-4o Mini" },
+      { id: "gpt-5.5", name: "GPT-5.5", ...GPT_5_OPENAI_LONG_CONTEXT_CAPABILITIES },
+      { id: "gpt-5.5-pro", name: "GPT-5.5 Pro", ...GPT_5_OPENAI_LONG_CONTEXT_CAPABILITIES },
+      { id: "gpt-5.4", name: "GPT-5.4", ...GPT_5_OPENAI_LONG_CONTEXT_CAPABILITIES },
+      { id: "gpt-5.4-pro", name: "GPT-5.4 Pro", ...GPT_5_OPENAI_LONG_CONTEXT_CAPABILITIES },
+      { id: "gpt-5.4-mini", name: "GPT-5.4 Mini", ...GPT_5_OPENAI_CODEX_CAPABILITIES },
+      { id: "gpt-5.4-nano", name: "GPT-5.4 Nano", ...GPT_5_OPENAI_CODEX_CAPABILITIES },
+      { id: "gpt-5.3-codex", name: "GPT-5.3 Codex", ...GPT_5_OPENAI_CODEX_RESPONSES_CAPABILITIES },
+      {
+        id: "gpt-5.3-chat-latest",
+        name: "GPT-5.3 Chat Latest",
+        ...GPT_5_3_OPENAI_CHAT_LATEST_CAPABILITIES,
+      },
+      {
+        id: "gpt-5.3-codex-spark",
+        name: "GPT-5.3 Codex Spark",
+        ...GPT_5_OPENAI_CODEX_SPARK_RESPONSES_CAPABILITIES,
+      },
+      { id: "gpt-5.2", name: "GPT-5.2", ...GPT_5_OPENAI_CODEX_CAPABILITIES },
+      {
+        id: "gpt-5.2-chat-latest",
+        name: "GPT-5.2 Chat Latest",
+        ...GPT_5_OPENAI_CHAT_LATEST_CAPABILITIES,
+      },
+      { id: "gpt-5.2-codex", name: "GPT-5.2 Codex", ...GPT_5_OPENAI_CODEX_RESPONSES_CAPABILITIES },
+      { id: "gpt-5.2-pro", name: "GPT-5.2 Pro", ...GPT_5_OPENAI_PRO_CAPABILITIES },
+      { id: "gpt-5.1", name: "GPT-5.1", ...GPT_5_OPENAI_CODEX_CAPABILITIES },
+      {
+        id: "gpt-5.1-chat-latest",
+        name: "GPT-5.1 Chat Latest",
+        ...GPT_5_OPENAI_CHAT_LATEST_CAPABILITIES,
+      },
+      { id: "gpt-5.1-codex", name: "GPT-5.1 Codex", ...GPT_5_OPENAI_CODEX_RESPONSES_CAPABILITIES },
+      {
+        id: "gpt-5.1-codex-mini",
+        name: "GPT-5.1 Codex Mini",
+        ...GPT_5_OPENAI_CODEX_RESPONSES_CAPABILITIES,
+      },
+      {
+        id: "gpt-5.1-codex-max",
+        name: "GPT-5.1 Codex Max",
+        ...GPT_5_OPENAI_CODEX_RESPONSES_CAPABILITIES,
+      },
+      { id: "gpt-5", name: "GPT-5", ...GPT_5_OPENAI_CODEX_CAPABILITIES },
+      {
+        id: "gpt-5-chat-latest",
+        name: "GPT-5 Chat Latest",
+        ...GPT_5_OPENAI_CODEX_CAPABILITIES,
+      },
+      { id: "gpt-5-mini", name: "GPT-5 Mini", ...GPT_5_OPENAI_CODEX_CAPABILITIES },
+      { id: "gpt-5-nano", name: "GPT-5 Nano", ...GPT_5_OPENAI_CODEX_CAPABILITIES },
+      { id: "gpt-5-pro", name: "GPT-5 Pro", ...GPT_5_OPENAI_5_PRO_CAPABILITIES },
+      { id: "gpt-5-codex", name: "GPT-5 Codex", ...GPT_5_OPENAI_CODEX_RESPONSES_CAPABILITIES },
       { id: "gpt-4-turbo", name: "GPT-4 Turbo" },
       { id: "o1", name: "O1", unsupportedParams: REASONING_UNSUPPORTED },
       { id: "o1-mini", name: "O1 Mini", unsupportedParams: REASONING_UNSUPPORTED },
@@ -530,6 +736,7 @@ export const REGISTRY: Record<string, RegistryEntry> = {
       "Anthropic-Version": "2023-06-01",
     },
     models: [
+      { id: "claude-opus-4-7", name: "Claude Opus 4.7", ...CLAUDE_OPUS_47_CAPABILITIES },
       { id: "claude-haiku-4.5", name: "Claude Haiku 4.5" },
       { id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4" },
       { id: "claude-sonnet-4-6-20251031", name: "Claude Sonnet 4.6 (Dated)" },
@@ -1230,7 +1437,6 @@ export const REGISTRY: Record<string, RegistryEntry> = {
       { id: "deepseek-v3.2", name: "DeepSeek V3.2 (Vertex Partner)" },
       { id: "qwen3-next-80b", name: "Qwen3 Next 80B (Vertex Partner)" },
       { id: "glm-5", name: "GLM-5 (Vertex Partner)" },
-      { id: "claude-opus-4-5@20251101", name: "Claude Opus 4.5 (Vertex)" },
       { id: "claude-sonnet-4-5@20251101", name: "Claude Sonnet 4.5 (Vertex)" },
     ],
   },
@@ -1332,7 +1538,6 @@ export const REGISTRY: Record<string, RegistryEntry> = {
       // Anthropic Claude — use bare IDs (confirmed working)
       { id: "claude-haiku-4-5", name: "Claude Haiku 4.5 (Puter)" },
       { id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5 (Puter)" },
-      { id: "claude-opus-4-5", name: "Claude Opus 4.5 (Puter)" },
       { id: "claude-sonnet-4", name: "Claude Sonnet 4 (Puter)" },
       { id: "claude-opus-4", name: "Claude Opus 4 (Puter)" },
       // Google Gemini — use google/ prefix (confirmed working)
