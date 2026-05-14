@@ -43,6 +43,19 @@ test("OpenAI-compatible legacy providers honor providerSpecificData.apiType", ()
   );
 });
 
+test("OpenAI-compatible responses providers ignore stale chatPath values", () => {
+  const providerSpecificData = {
+    apiType: "responses",
+    baseUrl: "https://legacy-proxy.example.com/v1/",
+    chatPath: "/chat/completions",
+  };
+  const url = buildProviderUrl("openai-compatible-sp-openai", "gpt-5.4", false, {
+    providerSpecificData,
+  });
+
+  assert.equal(url, "https://legacy-proxy.example.com/v1/responses");
+});
+
 test("Anthropic-compatible Claude Code providers use the Claude Code URL and headers", () => {
   const url = buildProviderUrl("anthropic-compatible-cc-demo", "claude-sonnet-4-6", false, {
     baseUrl: "https://proxy.example.com/v1/messages?beta=true",

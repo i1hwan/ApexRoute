@@ -8,7 +8,11 @@ import {
   CLAUDE_CODE_COMPATIBLE_DEFAULT_CHAT_PATH,
   joinClaudeCodeCompatibleUrl,
 } from "../services/claudeCodeCompatible.ts";
-import { getOpenAICompatibleType, isClaudeCodeCompatible } from "../services/provider.ts";
+import {
+  buildOpenAICompatibleUrl,
+  getOpenAICompatibleType,
+  isClaudeCodeCompatible,
+} from "../services/provider.ts";
 import { FORMATS } from "../translator/formats.ts";
 
 export class DefaultExecutor extends BaseExecutor {
@@ -23,14 +27,8 @@ export class DefaultExecutor extends BaseExecutor {
     if (this.provider?.startsWith?.("openai-compatible-")) {
       const psd = credentials?.providerSpecificData;
       const baseUrl = psd?.baseUrl || "https://api.openai.com/v1";
-      const normalized = baseUrl.replace(/\/$/, "");
-      const customPath = typeof psd?.chatPath === "string" && psd.chatPath ? psd.chatPath : null;
-      if (customPath) return `${normalized}${customPath}`;
-      const path =
-        getOpenAICompatibleType(this.provider, psd) === "responses"
-          ? "/responses"
-          : "/chat/completions";
-      return `${normalized}${path}`;
+      const apiType = getOpenAICompatibleType(this.provider, psd);
+      return buildOpenAICompatibleUrl(baseUrl, apiType, psd);
     }
     if (this.provider?.startsWith?.("anthropic-compatible-")) {
       const psd = credentials?.providerSpecificData;

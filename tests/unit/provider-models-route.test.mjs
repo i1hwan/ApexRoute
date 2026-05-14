@@ -127,6 +127,8 @@ test("provider models route falls back after OpenAI-compatible endpoint probes a
   assert.equal(response.status, 200);
   assert.equal(body.provider, "openai-compatible-fallback");
   assert.ok(Array.isArray(body.models));
+  assert.equal(body.source, "local_catalog");
+  assert.equal(body.warning, "API unavailable — using cached catalog");
   assert.ok(seenUrls.length >= 2);
 });
 
@@ -155,6 +157,34 @@ test("provider models route tries OpenAI-compatible custom modelsPath first", as
   assert.equal(seenUrls[0], "https://proxy.example.com/v1/custom-models");
   assert.deepEqual(body.models, [{ id: "edge-model", name: "Edge Model" }]);
   assert.equal(body.source, "api");
+});
+
+test("provider models route keeps OpenAI-compatible API source even when owned_by matches provider", async () => {
+  const connection = await seedConnection("openai-compatible-custom-path", {
+    apiKey: "sk-openai-compatible",
+    providerSpecificData: {
+      baseUrl: "https://proxy.example.com/v1",
+      modelsPath: "/custom-models",
+    },
+  });
+
+  globalThis.fetch = async () =>
+    Response.json({
+      data: [
+        {
+          id: "edge-model",
+          name: "Edge Model",
+          owned_by: "openai-compatible-custom-path",
+        },
+      ],
+    });
+
+  const response = await callRoute(connection.id);
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.source, "api");
+  assert.equal(body.warning, undefined);
 });
 
 test("provider models route normalizes chat endpoint base before custom modelsPath", async () => {
@@ -338,7 +368,7 @@ test("provider models route trims Anthropic-compatible message URLs and filters 
     assert.equal(init.method, "GET");
     assert.equal(init.headers["Content-Type"], "application/json");
     assert.equal(init.headers["x-api-key"], "sk-anthropic-compatible");
-    assert.equal(init.headers.Authorization, "Bearer anthropic-access");
+    assert.equal(init.headers.Authorization, undefined);
     assert.equal(init.headers["anthropic-version"], "2023-06-01");
 
     return Response.json({

@@ -171,8 +171,21 @@ test("v1 models catalog exposes current OpenAI GPT 5.x static models", async () 
 
   assert.equal(response.status, 200);
   assert.equal(byId.get("openai/gpt-5.5")?.context_length, 1050000);
+  assert.equal(byId.get("openai/gpt-5.5")?.max_output_tokens, 128000);
+  assert.equal(byId.get("openai/gpt-5.5")?.capabilities?.reasoning, true);
+  assert.equal(byId.get("openai/gpt-5.5")?.capabilities?.tools, true);
+  assert.deepEqual(byId.get("openai/gpt-5.5")?.supported_reasoning_efforts, [
+    "none",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+  ]);
   assert.equal(byId.get("openai/gpt-5.4-pro")?.context_length, 1050000);
   assert.equal(byId.get("openai/gpt-5.3-codex-spark")?.context_length, 128000);
+  assert.equal(byId.get("openai/gpt-5.3-codex-spark")?.max_output_tokens, 32000);
+  assert.equal(byId.get("openai/gpt-5.3-codex-spark")?.api_format, "responses");
+  assert.equal(byId.get("openai/gpt-5.3-codex-spark")?.target_format, "openai-responses");
   assert.equal(byId.get("openai/gpt-5.1-codex")?.context_length, 400000);
   assert.equal(byId.get("openai/gpt-5-codex")?.context_length, 400000);
 });
@@ -432,6 +445,8 @@ test("v1 models catalog exposes provider-prefixed custom models, filters by raw 
         apiFormat: "responses",
         supportedEndpoints: ["images"],
         inputTokenLimit: 1234,
+        outputTokenLimit: 5678,
+        supportsThinking: true,
       },
       {
         id: "hidden-custom",
@@ -470,7 +485,13 @@ test("v1 models catalog exposes provider-prefixed custom models, filters by raw 
   assert.equal(shortAlias.api_format, "responses");
   assert.deepEqual(shortAlias.supported_endpoints, ["images"]);
   assert.equal(shortAlias.context_length, 1234);
+  assert.equal(shortAlias.max_output_tokens, 5678);
+  assert.equal(shortAlias.capabilities?.reasoning, true);
+  assert.equal(shortAlias.capabilities?.thinking, true);
   assert.equal(providerAlias.parent, "cl/demo-custom");
+  assert.equal(providerAlias.api_format, "responses");
+  assert.deepEqual(providerAlias.supported_endpoints, ["images"]);
+  assert.equal(providerAlias.max_output_tokens, 5678);
 });
 
 test("v1 models catalog returns 500 when model compatibility lookup crashes", async () => {
@@ -576,8 +597,14 @@ test("v1 models catalog adds managed fallback models for Claude-compatible provi
   );
   const body = await response.json();
   const ids = new Set(body.data.map((item) => item.id));
+  const opus47 = body.data.find((item) => item.id === "ccdemo/claude-opus-4-7");
 
   assert.equal(response.status, 200);
   assert.ok(ids.has("ccdemo/claude-opus-4-6"));
+  assert.ok(opus47);
+  assert.equal(opus47.context_length, 1000000);
+  assert.equal(opus47.max_output_tokens, 128000);
+  assert.equal(opus47.capabilities?.thinking, true);
+  assert.ok(opus47.supported_reasoning_efforts.includes("xhigh"));
   assert.equal(ids.has("ccdemo/claude-sonnet-4-6"), false);
 });

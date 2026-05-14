@@ -9,8 +9,10 @@ function buildUrlOpenAI(_provider, credentials) {
   const baseUrl = psd?.baseUrl || "https://api.openai.com/v1";
   const normalized = baseUrl.replace(/\/$/, "");
   const customPath = typeof psd?.chatPath === "string" && psd.chatPath ? psd.chatPath : null;
-  if (customPath) return `${normalized}${customPath}`;
   const apiType = typeof psd?.apiType === "string" ? psd.apiType : "chat";
+  if (customPath && (apiType !== "responses" || /\/responses(?=\/|$|\?|#)/i.test(customPath))) {
+    return `${normalized}${customPath}`;
+  }
   const path = apiType === "responses" ? "/responses" : "/chat/completions";
   return `${normalized}${path}`;
 }
@@ -64,6 +66,17 @@ describe("Custom Endpoint Paths", () => {
         providerSpecificData: {
           apiType: "responses",
           baseUrl: "https://api.openai.com/v1",
+        },
+      });
+      assert.equal(url, "https://api.openai.com/v1/responses");
+    });
+
+    it("ignores stale chatPath when apiType is responses", () => {
+      const url = buildUrlOpenAI("openai-compatible-sp-openai", {
+        providerSpecificData: {
+          apiType: "responses",
+          baseUrl: "https://api.openai.com/v1",
+          chatPath: "/chat/completions",
         },
       });
       assert.equal(url, "https://api.openai.com/v1/responses");

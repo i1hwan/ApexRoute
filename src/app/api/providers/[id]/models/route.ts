@@ -480,6 +480,7 @@ export async function GET(
       // Remove duplicates
       const uniqueEndpoints = [...new Set(endpoints)];
       let models = null;
+      let source: "api" | "local_catalog" | null = null;
       let lastErrorStatus = null;
 
       for (const modelsUrl of uniqueEndpoints) {
@@ -498,6 +499,7 @@ export async function GET(
           if (response.ok) {
             const data = await response.json();
             models = data.data || data.models || [];
+            source = "api";
             break; // Success!
           }
 
@@ -526,19 +528,14 @@ export async function GET(
           name: m.name || m.id,
           owned_by: provider,
         }));
+        source = "local_catalog";
       }
-
-      // Track source for MCP tool T39 requirement
-      const source =
-        models === null || (models && models.length > 0 && models[0].owned_by === provider)
-          ? "local_catalog"
-          : "api";
 
       return buildResponse({
         provider,
         connectionId,
         models,
-        source,
+        source: source || "api",
         ...(source === "local_catalog"
           ? { warning: "API unavailable — using cached catalog" }
           : {}),
@@ -665,15 +662,17 @@ export async function GET(
 
       const modelsPath = getProviderModelsPath(connection.providerSpecificData) || "/models";
       const url = joinUrlPath(baseUrl, modelsPath);
-      const token = accessToken || apiKey;
       const response = await runWithProxyContext(proxy, () =>
         fetch(url, {
           method: "GET",
           headers: {
             "Content-Type": "application/json",
-            ...(apiKey ? { "x-api-key": apiKey } : {}),
             "anthropic-version": "2023-06-01",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            ...(apiKey
+              ? { "x-api-key": apiKey }
+              : accessToken
+                ? { Authorization: `Bearer ${accessToken}` }
+                : {}),
           },
         })
       );

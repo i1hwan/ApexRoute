@@ -43,8 +43,32 @@ export function getOpenAICompatibleType(provider, providerSpecificData = null) {
   return provider.includes("responses") ? "responses" : "chat";
 }
 
-function buildOpenAICompatibleUrl(baseUrl, apiType) {
+function getSanitizedCustomPath(providerSpecificData) {
+  const rawPath =
+    providerSpecificData &&
+    typeof providerSpecificData === "object" &&
+    typeof providerSpecificData.chatPath === "string"
+      ? providerSpecificData.chatPath
+      : "";
+  if (!rawPath) return null;
+  if (!rawPath.startsWith("/")) return null;
+  if (rawPath.includes("\0")) return null;
+  if (rawPath.includes("..")) return null;
+  if (rawPath.length > 512) return null;
+  return rawPath;
+}
+
+function isResponsesEndpointPath(path) {
+  return /\/responses(?=\/|$|\?|#)/i.test(path);
+}
+
+export function buildOpenAICompatibleUrl(baseUrl, apiType, providerSpecificData = null) {
   const normalized = baseUrl.replace(/\/$/, "");
+  const customPath = getSanitizedCustomPath(providerSpecificData);
+  if (customPath && (apiType !== "responses" || isResponsesEndpointPath(customPath))) {
+    return `${normalized}${customPath}`;
+  }
+
   const path = apiType === "responses" ? "/responses" : "/chat/completions";
   return `${normalized}${path}`;
 }
@@ -230,7 +254,7 @@ export function buildProviderUrl(
       options?.baseUrl ||
       (typeof providerSpecificData?.baseUrl === "string" ? providerSpecificData.baseUrl : null) ||
       OPENAI_COMPATIBLE_DEFAULTS.baseUrl;
-    return buildOpenAICompatibleUrl(baseUrl, apiType);
+    return buildOpenAICompatibleUrl(baseUrl, apiType, providerSpecificData);
   }
   if (isAnthropicCompatible(provider)) {
     const baseUrl = options?.baseUrl || ANTHROPIC_COMPATIBLE_DEFAULTS.baseUrl;

@@ -15,6 +15,10 @@ import {
   isOpenAICompatibleProvider,
 } from "@/shared/constants/providers";
 import { validateQoderCliPat } from "@omniroute/open-sse/services/qoderCli.ts";
+import {
+  buildOpenAICompatibleUrl,
+  getOpenAICompatibleType,
+} from "@omniroute/open-sse/services/provider.ts";
 
 const OPENAI_LIKE_FORMATS = new Set(["openai", "openai-responses"]);
 const GEMINI_LIKE_FORMATS = new Set(["gemini", "gemini-cli"]);
@@ -56,13 +60,8 @@ function resolveChatUrl(provider: string, baseUrl: string, providerSpecificData:
   if (!normalized) return "";
 
   if (isOpenAICompatibleProvider(provider)) {
-    if (providerSpecificData?.chatPath) {
-      return `${normalized}${providerSpecificData.chatPath}`;
-    }
-    if (providerSpecificData?.apiType === "responses") {
-      return `${normalized}/responses`;
-    }
-    return `${normalized}/chat/completions`;
+    const apiType = getOpenAICompatibleType(provider, providerSpecificData);
+    return buildOpenAICompatibleUrl(normalized, apiType, providerSpecificData);
   }
 
   if (
@@ -533,9 +532,8 @@ async function validateOpenAICompatibleProvider({ apiKey, providerSpecificData =
 
   // Step 2: Fallback — try a minimal chat completion request
   // Many providers don't expose /models but accept chat completions fine
-  const apiType = providerSpecificData.apiType || "chat";
-  const chatSuffix = apiType === "responses" ? "/responses" : "/chat/completions";
-  const chatUrl = `${baseUrl}${chatSuffix}`;
+  const apiType = providerSpecificData.apiType === "responses" ? "responses" : "chat";
+  const chatUrl = buildOpenAICompatibleUrl(baseUrl, apiType, providerSpecificData);
   const testModelId = validationModelId;
 
   try {

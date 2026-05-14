@@ -71,6 +71,27 @@ test("BaseExecutor: legacy openai-compatible providers honor providerSpecificDat
   assert.equal(url, "https://proxy.example/v1/responses");
 });
 
+test("BaseExecutor: responses-compatible URLs ignore stale chat completion paths", () => {
+  const executor = new BaseExecutor("openai-compatible-sp-openai", {});
+  const staleChatPathUrl = executor.buildUrl("gpt-5.4", true, 0, {
+    providerSpecificData: {
+      apiType: "responses",
+      baseUrl: "https://proxy.example/v1/",
+      chatPath: "/chat/completions",
+    },
+  });
+  const customResponsesPathUrl = executor.buildUrl("gpt-5.4", true, 0, {
+    providerSpecificData: {
+      apiType: "responses",
+      baseUrl: "https://proxy.example/v1/",
+      chatPath: "/custom/responses",
+    },
+  });
+
+  assert.equal(staleChatPathUrl, "https://proxy.example/v1/responses");
+  assert.equal(customResponsesPathUrl, "https://proxy.example/v1/custom/responses");
+});
+
 test("DefaultExecutor.buildUrl handles Gemini, Claude and Qwen variants", () => {
   const gemini = new DefaultExecutor("gemini");
   const claude = new DefaultExecutor("claude");
@@ -138,6 +159,26 @@ test("DefaultExecutor.buildUrl handles openai-compatible and anthropic-compatibl
       },
     }),
     "https://proxy.example/v1/responses"
+  );
+  assert.equal(
+    openAILegacyResponsesCompat.buildUrl("gpt-5.4", true, 0, {
+      providerSpecificData: {
+        apiType: "responses",
+        baseUrl: "https://proxy.example/v1/",
+        chatPath: "/chat/completions",
+      },
+    }),
+    "https://proxy.example/v1/responses"
+  );
+  assert.equal(
+    openAILegacyResponsesCompat.buildUrl("gpt-5.4", true, 0, {
+      providerSpecificData: {
+        apiType: "responses",
+        baseUrl: "https://proxy.example/v1/",
+        chatPath: "/custom/responses",
+      },
+    }),
+    "https://proxy.example/v1/custom/responses"
   );
   assert.equal(
     anthropicCompat.buildUrl("claude-sonnet-4", true, 0, {

@@ -1,22 +1,8 @@
 import { HTTP_STATUS, FETCH_TIMEOUT_MS } from "../config/constants.ts";
 import { applyFingerprint, isCliCompatEnabled } from "../config/cliFingerprints.ts";
 import { getRotatingApiKey } from "../services/apiKeyRotator.ts";
-import { getOpenAICompatibleType } from "../services/provider.ts";
+import { buildOpenAICompatibleUrl, getOpenAICompatibleType } from "../services/provider.ts";
 import { sanitizeSurrogatesDeep } from "../utils/sanitizeSurrogates.ts";
-
-/**
- * Sanitizes a custom API path to prevent path traversal attacks.
- * Valid paths must start with '/', contain no '..' segments,
- * no null bytes, and be reasonable in length.
- */
-function sanitizePath(path: string): boolean {
-  if (typeof path !== "string") return false;
-  if (!path.startsWith("/")) return false;
-  if (path.includes("\0")) return false; // null byte
-  if (path.includes("..")) return false; // path traversal
-  if (path.length > 512) return false; // sanity limit
-  return true;
-}
 
 type JsonRecord = Record<string, unknown>;
 
@@ -162,16 +148,8 @@ export class BaseExecutor {
     if (this.provider?.startsWith?.("openai-compatible-")) {
       const psd = credentials?.providerSpecificData;
       const baseUrl = typeof psd?.baseUrl === "string" ? psd.baseUrl : "https://api.openai.com/v1";
-      const normalized = baseUrl.replace(/\/$/, "");
-      // Sanitize custom path: must start with '/', no path traversal, no null bytes
-      const rawPath = typeof psd?.chatPath === "string" && psd.chatPath ? psd.chatPath : null;
-      const customPath = rawPath && sanitizePath(rawPath) ? rawPath : null;
-      if (customPath) return `${normalized}${customPath}`;
-      const path =
-        getOpenAICompatibleType(this.provider, psd) === "responses"
-          ? "/responses"
-          : "/chat/completions";
-      return `${normalized}${path}`;
+      const apiType = getOpenAICompatibleType(this.provider, psd);
+      return buildOpenAICompatibleUrl(baseUrl, apiType, psd);
     }
     const baseUrls = this.getBaseUrls();
     return baseUrls[urlIndex] || baseUrls[0] || this.config.baseUrl;
