@@ -53,10 +53,24 @@ test("BaseExecutor: openai-compatible buildUrl sanitizes custom chat paths", () 
       chatPath: "/ok\0evil",
     },
   });
+  const invalidEncodedTraversal = executor.buildUrl("gpt-4.1", true, 0, {
+    providerSpecificData: {
+      baseUrl: "https://proxy.example/v1/",
+      chatPath: "/safe/%2e%2e/admin",
+    },
+  });
+  const invalidEncodedControl = executor.buildUrl("gpt-4.1", true, 0, {
+    providerSpecificData: {
+      baseUrl: "https://proxy.example/v1/",
+      chatPath: "/ok%0Aevil",
+    },
+  });
 
   assert.equal(valid, "https://proxy.example/v1/custom/chat/completions");
   assert.equal(invalid, "https://proxy.example/v1/chat/completions");
   assert.equal(invalidNullByte, "https://proxy.example/v1/chat/completions");
+  assert.equal(invalidEncodedTraversal, "https://proxy.example/v1/chat/completions");
+  assert.equal(invalidEncodedControl, "https://proxy.example/v1/chat/completions");
 });
 
 test("BaseExecutor: legacy openai-compatible providers honor providerSpecificData.apiType", () => {

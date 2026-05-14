@@ -50,12 +50,26 @@ function getSanitizedCustomPath(providerSpecificData) {
     typeof providerSpecificData.chatPath === "string"
       ? providerSpecificData.chatPath
       : "";
-  if (!rawPath) return null;
-  if (!rawPath.startsWith("/")) return null;
-  if (rawPath.includes("\0")) return null;
-  if (rawPath.includes("..")) return null;
-  if (rawPath.length > 512) return null;
-  return rawPath;
+  const trimmed = rawPath.trim();
+  if (!trimmed) return null;
+  if (!trimmed.startsWith("/")) return null;
+  if (trimmed.length > 512) return null;
+  if (/[\x00-\x1f\x7f]/.test(trimmed)) return null;
+
+  const rawPathOnly = trimmed.split(/[?#]/)[0];
+  let decodedPathOnly = rawPathOnly;
+  try {
+    decodedPathOnly = decodeURIComponent(rawPathOnly);
+  } catch {
+    return null;
+  }
+
+  if (/[\x00-\x1f\x7f]/.test(decodedPathOnly)) return null;
+  if (rawPathOnly.split("/").includes("..") || decodedPathOnly.split("/").includes("..")) {
+    return null;
+  }
+
+  return trimmed;
 }
 
 function isResponsesEndpointPath(path) {

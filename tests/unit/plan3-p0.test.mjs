@@ -34,6 +34,18 @@ test("getModelInfoCore resolves gpt-5.4 to codex", async () => {
   assert.equal(info.model, "gpt-5.4");
 });
 
+test("getModelInfoCore gives exact bare model ownership priority over provider legacy aliases", async () => {
+  const info = await getModelInfoCore("gemini-3-flash", {});
+  assert.equal(info.provider, "antigravity");
+  assert.equal(info.model, "gemini-3-flash");
+});
+
+test("getModelInfoCore ignores provider legacy aliases that target unregistered models", async () => {
+  const info = await getModelInfoCore("gh/gemini-3-flash", {});
+  assert.equal(info.provider, "github");
+  assert.equal(info.model, "gemini-3-flash");
+});
+
 test("getModelInfoCore resolves current Apex bare GPT-5 models without ambiguity", async () => {
   const gpt55 = await getModelInfoCore("gpt-5.5", {});
   assert.equal(gpt55.provider, "codex");

@@ -135,10 +135,22 @@ export function resolveProviderAlias(aliasOrId) {
  * Resolve provider-specific legacy model alias to canonical model ID.
  */
 export function resolveProviderModelAlias(providerOrAlias, modelId) {
+  return getProviderModelAliasTarget(providerOrAlias, modelId) || modelId;
+}
+
+function isModelInProviderRegistry(providerId, modelId) {
+  const providerKey = PROVIDER_ID_TO_ALIAS[providerId] || providerId;
+  const models = PROVIDER_MODELS[providerKey] || [];
+  return models.some((modelEntry) => modelEntry?.id === modelId);
+}
+
+function getProviderModelAliasTarget(providerOrAlias, modelId) {
   if (!modelId || typeof modelId !== "string") return modelId;
   const providerId = resolveProviderAlias(providerOrAlias);
   const aliases = PROVIDER_MODEL_ALIASES[providerId];
-  return aliases?.[modelId] || modelId;
+  const canonicalModel = aliases?.[modelId];
+  if (!canonicalModel) return null;
+  return isModelInProviderRegistry(providerId, canonicalModel) ? canonicalModel : null;
 }
 
 function findProviderModelAliasMatches(modelId) {
@@ -146,7 +158,8 @@ function findProviderModelAliasMatches(modelId) {
 
   return Object.entries(PROVIDER_MODEL_ALIASES)
     .map(([provider, aliases]) => {
-      const canonicalModel = aliases?.[modelId];
+      if (!aliases?.[modelId]) return null;
+      const canonicalModel = getProviderModelAliasTarget(provider, modelId);
       return canonicalModel ? { provider, model: canonicalModel } : null;
     })
     .filter(Boolean);
@@ -288,34 +301,6 @@ export async function getModelInfoCore(modelStr, aliasesOrGetter) {
   }
 
   const modelId = parsed.model;
-  const providerAliasMatches = findProviderModelAliasMatches(modelId);
-  if (providerAliasMatches.length === 1) {
-    return {
-      provider: providerAliasMatches[0].provider,
-      model: providerAliasMatches[0].model,
-      extendedContext,
-    };
-  }
-  if (providerAliasMatches.length > 1) {
-    const aliasesForHint = providerAliasMatches.map(
-      (match) => PROVIDER_ID_TO_ALIAS[match.provider] || match.provider
-    );
-    const hints = providerAliasMatches
-      .slice(0, 2)
-      .map((match) => `${PROVIDER_ID_TO_ALIAS[match.provider] || match.provider}/${modelId}`);
-    const message = `Ambiguous model alias '${modelId}'. Use provider/model prefix (ex: ${hints.join(" or ")}).`;
-    console.warn(`[MODEL] ${message} Candidates: ${aliasesForHint.join(", ")}`);
-    return {
-      provider: null,
-      model: modelId,
-      errorType: "ambiguous_model",
-      errorSubType: "ambiguous_model_alias",
-      errorMessage: message,
-      candidateProviders: providerAliasMatches.map((match) => match.provider),
-      candidateAliases: aliasesForHint,
-    };
-  }
-
   const providers = MODEL_TO_PROVIDERS.get(modelId) || [];
 
   if (providers.includes("codex") && CODEX_PREFERRED_BARE_MODELS.has(modelId)) {
@@ -360,6 +345,34 @@ export async function getModelInfoCore(modelStr, aliasesOrGetter) {
       errorType: "ambiguous_model",
       errorMessage: message,
       candidateProviders: providers,
+      candidateAliases: aliasesForHint,
+    };
+  }
+
+  const providerAliasMatches = findProviderModelAliasMatches(modelId);
+  if (providerAliasMatches.length === 1) {
+    return {
+      provider: providerAliasMatches[0].provider,
+      model: providerAliasMatches[0].model,
+      extendedContext,
+    };
+  }
+  if (providerAliasMatches.length > 1) {
+    const aliasesForHint = providerAliasMatches.map(
+      (match) => PROVIDER_ID_TO_ALIAS[match.provider] || match.provider
+    );
+    const hints = providerAliasMatches
+      .slice(0, 2)
+      .map((match) => `${PROVIDER_ID_TO_ALIAS[match.provider] || match.provider}/${modelId}`);
+    const message = `Ambiguous model alias '${modelId}'. Use provider/model prefix (ex: ${hints.join(" or ")}).`;
+    console.warn(`[MODEL] ${message} Candidates: ${aliasesForHint.join(", ")}`);
+    return {
+      provider: null,
+      model: modelId,
+      errorType: "ambiguous_model",
+      errorSubType: "ambiguous_model_alias",
+      errorMessage: message,
+      candidateProviders: providerAliasMatches.map((match) => match.provider),
       candidateAliases: aliasesForHint,
     };
   }
