@@ -110,6 +110,13 @@ test("getTokenLimit: models.dev alias data still applies to unknown registry mod
   assert.equal(getTokenLimit("codex", "future-codex-model"), 777000);
 });
 
+test("getTokenLimit: static model specs fill current-model gaps when sync DB is empty", () => {
+  assert.equal(getTokenLimit("anthropic", "claude-sonnet-4.6"), 1000000);
+  assert.equal(getTokenLimit("github", "claude-opus-4.1"), 200000);
+  assert.equal(getTokenLimit("puter", "google/gemini-3-pro"), 1000000);
+  assert.equal(getTokenLimit("gemini-cli", "gemini-3-flash-preview"), 1048576);
+});
+
 test("getTokenLimit: default fallback", () => {
   assert.equal(getTokenLimit("unknown"), 128000);
 });

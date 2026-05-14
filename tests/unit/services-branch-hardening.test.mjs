@@ -81,11 +81,13 @@ test("model capability helpers cover denylist, empty input and default-safe path
   assert.equal(modelCapabilities.supportsToolCalling(""), false);
   assert.equal(modelCapabilities.supportsToolCalling("openai/gpt-oss-120b"), false);
   assert.equal(modelCapabilities.supportsToolCalling("deepseek-reasoner"), false);
+  assert.equal(modelCapabilities.supportsToolCalling("google/gemini-3.1-flash-image"), false);
   assert.equal(modelCapabilities.supportsToolCalling("openai/gpt-4o"), true);
 
   assert.equal(modelCapabilities.supportsReasoning(""), true);
   assert.equal(modelCapabilities.supportsReasoning("antigravity/claude-sonnet-4-6"), false);
   assert.equal(modelCapabilities.supportsReasoning("antigravity/claude-sonnet-4"), false);
+  assert.equal(modelCapabilities.supportsReasoning("gpt-5.3-chat-latest"), false);
   assert.equal(modelCapabilities.supportsReasoning("openai/gpt-4o"), true);
 });
 

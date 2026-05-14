@@ -8,6 +8,7 @@
 import { REGISTRY, type RegistryEntry } from "../config/providerRegistry.ts";
 import { resolveProviderModelAlias } from "./model.ts";
 import { getModelContextLimit } from "../../src/lib/modelsDevSync";
+import { getModelSpec } from "../../src/shared/constants/modelSpecs";
 
 // Default token limits per provider (fallbacks when not in registry)
 const DEFAULT_LIMITS: Record<string, number> = {
@@ -65,7 +66,7 @@ export function estimateTokens(text) {
 
 /**
  * Get token limit for a provider/model combination
- * Priority: Env override > Registry model > models.dev DB > Registry defaultContextLength > DEFAULT_LIMITS
+ * Priority: Env override > Registry model > models.dev DB > modelSpecs > Registry defaultContextLength > DEFAULT_LIMITS
  */
 export function getTokenLimit(provider, model = null) {
   // 1. Check environment variable override first
@@ -95,12 +96,18 @@ export function getTokenLimit(provider, model = null) {
     }
   }
 
-  // 4. Check registry for provider default
+  // 4. Check static model specs for current models when the optional sync DB is empty.
+  if (canonicalModel) {
+    const specLimit = getModelSpec(canonicalModel)?.contextWindow;
+    if (specLimit && specLimit > 0) return specLimit;
+  }
+
+  // 5. Check registry for provider default
   if (registryEntry?.defaultContextLength) {
     return registryEntry.defaultContextLength;
   }
 
-  // 5. Check if model name hints at a known limit
+  // 6. Check if model name hints at a known limit
   if (canonicalModel) {
     const lower = canonicalModel.toLowerCase();
     if (lower.includes("claude")) return DEFAULT_LIMITS.claude;
@@ -115,7 +122,7 @@ export function getTokenLimit(provider, model = null) {
       return DEFAULT_LIMITS.codex;
   }
 
-  // 6. Fallback to DEFAULT_LIMITS or default
+  // 7. Fallback to DEFAULT_LIMITS or default
   return DEFAULT_LIMITS[provider] || DEFAULT_LIMITS.default;
 }
 

@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 const { REGISTRY } = await import("../../open-sse/config/providerRegistry.ts");
-const { getStaticModelsForProvider } = await import("../../src/app/api/providers/[id]/models/route.ts");
+const { getStaticModelsForProvider } =
+  await import("../../src/app/api/providers/[id]/models/route.ts");
 const { resolveModelAlias: resolveDeprecatedAlias } =
   await import("../../open-sse/services/modelDeprecation.ts");
 const { normalizeThinkingLevel } = await import("../../open-sse/services/thinkingBudget.ts");
@@ -43,18 +44,26 @@ test("T33: thinkingLevel string is converted into numeric thinkingBudget", () =>
 test("T34: max output tokens are capped by model spec", () => {
   assert.equal(capMaxOutputTokens("gemini-3-flash", 131072), 65536);
   assert.equal(capMaxOutputTokens("gemini-3-flash"), 65536);
-  assert.equal(capMaxOutputTokens("gemini-3.1-pro-high", 131072), 65535);
+  assert.equal(capMaxOutputTokens("gemini-3.1-pro-high", 131072), 65536);
+  assert.equal(capMaxOutputTokens("gemini-3-pro-preview", 131072), 64000);
+  assert.equal(capMaxOutputTokens("gemini-3.1-flash-image", 131072), 32768);
 });
 
 test("T38: modelSpecs exposes centralized helpers with alias and prefix lookup", () => {
   assert.equal(typeof MODEL_SPECS["gemini-3.1-pro-high"], "object");
-  assert.equal(getModelSpec("gemini-3-pro-high").maxOutputTokens, 65535);
+  assert.equal(getModelSpec("gemini-3-pro-high").maxOutputTokens, 65536);
   assert.equal(getModelSpec("gemini-3-flash-preview").maxOutputTokens, 65536);
-  assert.equal(getModelSpec("gemini-3.1-pro-preview").maxOutputTokens, 65535);
-  assert.equal(getModelSpec("gemini-3.1-pro-preview-customtools").maxOutputTokens, 65535);
+  assert.equal(getModelSpec("google/gemini-3-flash").supportsThinking, true);
+  assert.equal(getModelSpec("gemini-3-pro-preview").maxOutputTokens, 64000);
+  assert.equal(getModelSpec("google/gemini-3-pro").contextWindow, 1000000);
+  assert.equal(getModelSpec("gemini-3.1-flash-image").supportsTools, false);
+  assert.equal(getModelSpec("gemini-3.1-pro-preview").maxOutputTokens, 65536);
+  assert.equal(getModelSpec("gemini-3.1-pro-preview-customtools").maxOutputTokens, 65536);
   assert.equal(resolveModelAlias("gemini-3-pro-low"), "gemini-3.1-pro-low");
+  assert.equal(resolveModelAlias("google/gemini-3-pro"), "gemini-3-pro-preview");
   assert.equal(resolveModelAlias("gemini-3.1-pro-preview"), "gemini-3.1-pro-high");
   assert.equal(resolveModelAlias("gemini-3.1-pro-preview-customtools"), "gemini-3.1-pro-high");
   assert.equal(getDefaultThinkingBudget("gemini-3.1-pro-high"), 24576);
   assert.equal(capThinkingBudget("gemini-3.1-pro-low", 50000), 16000);
+  assert.equal(capThinkingBudget("gemini-3-flash", 50000), 32768);
 });

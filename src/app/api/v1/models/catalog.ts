@@ -79,6 +79,7 @@ function getVisionCapabilityFields(modelId: string) {
 }
 
 function getSupportedReasoningEfforts(model: any, spec: any): string[] | undefined {
+  if (spec?.supportsThinking === false) return undefined;
   if (Array.isArray(spec?.supportedEfforts) && spec.supportedEfforts.length > 0) {
     return spec.supportedEfforts;
   }
@@ -106,20 +107,20 @@ function getCapabilityMetadata(model: any, modelId: string, visionFields: any = 
     if (visionFields.output_modalities) fields.output_modalities = visionFields.output_modalities;
   }
 
-  if (
-    model?.toolCalling === true ||
-    model?.supportsTools === true ||
-    spec?.supportsTools === true
-  ) {
+  const supportsTools =
+    typeof spec?.supportsTools === "boolean"
+      ? spec.supportsTools
+      : model?.toolCalling === true || model?.supportsTools === true;
+  if (supportsTools) {
     capabilities.tools = true;
     capabilities.tool_calling = true;
   }
 
-  if (
-    model?.supportsReasoning === true ||
-    model?.supportsThinking === true ||
-    spec?.supportsThinking === true
-  ) {
+  const supportsReasoning =
+    typeof spec?.supportsThinking === "boolean"
+      ? spec.supportsThinking
+      : model?.supportsReasoning === true || model?.supportsThinking === true;
+  if (supportsReasoning) {
     capabilities.reasoning = true;
     capabilities.thinking = true;
   }
