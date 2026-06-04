@@ -21,7 +21,7 @@ const SUPPORTED_LANES = ["claude-oauth-prefixed"] as const;
 const DEFAULT_STATE: ToolArgumentModeSettings = {
   default: "stream-normalized",
   byProvider: {},
-  byLane: {},
+  byLane: { "claude-oauth-prefixed": "buffered-final" },
 };
 
 export default function ToolArgumentModeSection() {

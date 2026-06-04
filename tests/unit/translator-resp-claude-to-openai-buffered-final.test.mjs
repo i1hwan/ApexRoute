@@ -337,6 +337,14 @@ test("resolveToolArgumentMode resolver precedence", async () => {
   assert.equal(resolveToolArgumentMode(null, "claude", null), "stream-normalized");
   assert.equal(resolveToolArgumentMode({}, "claude", null), "stream-normalized");
   assert.equal(
+    resolveToolArgumentMode(null, "claude", "claude-oauth-prefixed"),
+    "buffered-final"
+  );
+  assert.equal(
+    resolveToolArgumentMode({}, "claude", "claude-oauth-prefixed"),
+    "buffered-final"
+  );
+  assert.equal(
     resolveToolArgumentMode({ default: "buffered-final" }, "claude", null),
     "buffered-final"
   );
@@ -367,6 +375,18 @@ test("resolveToolArgumentMode resolver precedence", async () => {
       "claude-oauth-prefixed"
     ),
     "buffered-final"
+  );
+  assert.equal(
+    resolveToolArgumentMode(
+      {
+        default: "stream-normalized",
+        byProvider: { claude: "stream-normalized" },
+        byLane: { "claude-oauth-prefixed": "stream-normalized" },
+      },
+      "claude",
+      "claude-oauth-prefixed"
+    ),
+    "stream-normalized"
   );
   assert.equal(
     resolveToolArgumentMode(
