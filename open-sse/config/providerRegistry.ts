@@ -150,6 +150,8 @@ const CLAUDE_OPUS_47_CAPABILITIES = {
   maxOutputTokens: CLAUDE_OPUS_MAX_OUTPUT_TOKENS,
 } as const;
 
+const CLAUDE_OPUS_48_CAPABILITIES = CLAUDE_OPUS_47_CAPABILITIES;
+
 export interface RegistryOAuth {
   clientIdEnv?: string;
   clientIdDefault?: string;
@@ -284,6 +286,7 @@ export const REGISTRY: Record<string, RegistryEntry> = {
     },
     models: [
       { id: "claude-opus-4-7", name: "Claude Opus 4.7", ...CLAUDE_OPUS_47_CAPABILITIES },
+      { id: "claude-opus-4-8", name: "Claude Opus 4.8", ...CLAUDE_OPUS_48_CAPABILITIES },
       { id: "claude-opus-4-6", name: "Claude Opus 4.6" },
       { id: "claude-sonnet-4-6", name: "Claude 4.6 Sonnet" },
       { id: "claude-sonnet-4-5-20250929", name: "Claude 4.5 Sonnet" },
@@ -737,6 +740,7 @@ export const REGISTRY: Record<string, RegistryEntry> = {
     },
     models: [
       { id: "claude-opus-4-7", name: "Claude Opus 4.7", ...CLAUDE_OPUS_47_CAPABILITIES },
+      { id: "claude-opus-4-8", name: "Claude Opus 4.8", ...CLAUDE_OPUS_48_CAPABILITIES },
       { id: "claude-haiku-4.5", name: "Claude Haiku 4.5" },
       { id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4" },
       { id: "claude-sonnet-4-6-20251031", name: "Claude Sonnet 4.6 (Dated)" },

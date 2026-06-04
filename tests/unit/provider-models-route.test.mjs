@@ -436,6 +436,7 @@ test("provider models route filters hidden models from the static Claude catalog
   );
   assert.ok(body.models.some((model) => model.id === "claude-opus-4-6"));
   assert.ok(body.models.some((model) => model.id === "claude-opus-4-7"));
+  assert.ok(body.models.some((model) => model.id === "claude-opus-4-8"));
 });
 
 test("provider models route returns Codex registry catalog without remote listing", async () => {

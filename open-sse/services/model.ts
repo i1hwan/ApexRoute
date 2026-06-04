@@ -107,7 +107,7 @@ function isOpenAIPreferredBareModel(modelId) {
   );
 }
 
-const ANTHROPIC_PREFERRED_BARE_MODELS = new Set(["claude-opus-4-7"]);
+const ANTHROPIC_PREFERRED_BARE_MODELS = new Set(["claude-opus-4-8", "claude-opus-4-7"]);
 
 // Reverse index: modelId -> providerIds that expose this model
 const MODEL_TO_PROVIDERS = new Map();
