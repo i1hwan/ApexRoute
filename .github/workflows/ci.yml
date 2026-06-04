@@ -357,6 +357,7 @@ jobs:
       API_KEY_SECRET: ci-test-api-key-secret-long
       INITIAL_PASSWORD: ci-test-password-for-integration
       DATA_DIR: /tmp/omniroute-ci
+      APP_LOG_TO_FILE: "false"
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
