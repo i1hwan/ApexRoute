@@ -15,7 +15,6 @@ import { getTokenLimit } from "./contextManager.ts";
 import { parseModel } from "./model.ts";
 import { CONTEXT_OVERFLOW_REGEX } from "./errorClassifier.ts";
 import {
-  getProviderModels,
   getModelTargetFormat,
   isValidModel,
   PROVIDER_ID_TO_ALIAS,
@@ -79,9 +78,15 @@ const MODEL_FAMILIES: Record<string, string[]> = {
   "gemini-2.5-pro-preview-06-05": ["gemini-2.5-pro", "gemini-2.5-pro-exp-03-25"],
 
   // Claude Opus family
-  "claude-opus-4-7": ["claude-opus-4-6", "claude-sonnet-4-6"],
-  "claude-opus-4-6": ["claude-opus-4-7", "claude-opus-4-6-thinking", "claude-sonnet-4-6"],
-  "claude-opus-4-6-thinking": ["claude-opus-4-7", "claude-opus-4-6"],
+  "claude-opus-4-8": ["claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6"],
+  "claude-opus-4-7": ["claude-opus-4-8", "claude-opus-4-6", "claude-sonnet-4-6"],
+  "claude-opus-4-6": [
+    "claude-opus-4-8",
+    "claude-opus-4-7",
+    "claude-opus-4-6-thinking",
+    "claude-sonnet-4-6",
+  ],
+  "claude-opus-4-6-thinking": ["claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6"],
 
   // Claude Sonnet family
   "claude-sonnet-4-6": ["claude-sonnet-4-5-20250929", "claude-sonnet-4-20250514"],
@@ -278,10 +283,6 @@ function isDynamicCompatibleProvider(provider?: string | null): boolean {
   );
 }
 
-function hasStaticProviderRegistry(provider: string): boolean {
-  return getProviderModels(provider).length > 0;
-}
-
 function isCodexProvider(providerHint?: string | null): boolean {
   const provider = resolveProviderKey(providerHint);
   return provider === "cx" || provider === "codex";
@@ -327,19 +328,19 @@ function isFallbackCandidateAvailable(
   if (!provider || !modelId) return false;
 
   const dynamicCompatible = isDynamicCompatibleProvider(providerHint);
+  if (dynamicCompatible) {
+    // Dynamic compatible providers can expose models outside ApexRoute's static registry.
+    // Only reject candidates when registry metadata knows they target a conflicting wire format.
+    const knownTargetFormat = getModelTargetFormat(provider, modelId);
+    return !knownTargetFormat || !targetFormatHint || knownTargetFormat === targetFormatHint;
+  }
+
   const isKnownModel = isValidModel(provider, modelId);
   if (isKnownModel) {
-    if (dynamicCompatible) {
-      const knownTargetFormat = getModelTargetFormat(provider, modelId);
-      return !knownTargetFormat || !targetFormatHint || knownTargetFormat === targetFormatHint;
-    }
     return targetFormatMatches(provider, modelId, targetFormatHint);
   }
 
-  if (!dynamicCompatible || !hasStaticProviderRegistry(provider)) return false;
-
-  // Dynamic compatible providers may expose custom models outside ApexRoute's static registry.
-  return true;
+  return false;
 }
 
 /**

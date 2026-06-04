@@ -12,6 +12,9 @@ import { runWithProxyContext } from "@omniroute/open-sse/utils/proxyFetch.ts";
 
 type JsonRecord = Record<string, unknown>;
 
+const CUSTOM_MODELS_PATH_MAX_LENGTH = 512;
+const ASCII_CONTROL_CHARS_PATTERN = /[\u0000-\u001F\u007F]/;
+
 function asRecord(value: unknown): JsonRecord {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonRecord) : {};
 }
@@ -28,8 +31,8 @@ function getProviderModelsPath(providerSpecificData: unknown): string | null {
   if (typeof modelsPath !== "string") return null;
   const trimmed = modelsPath.trim();
   if (!trimmed.startsWith("/")) return null;
-  if (trimmed.length > 512) return null;
-  if (/[\u0000-\u001F\u007F]/.test(trimmed)) return null;
+  if (trimmed.length > CUSTOM_MODELS_PATH_MAX_LENGTH) return null;
+  if (ASCII_CONTROL_CHARS_PATTERN.test(trimmed)) return null;
   const pathOnly = trimmed.split(/[?#]/)[0];
   let decodedPathOnly = pathOnly;
   try {
@@ -37,7 +40,7 @@ function getProviderModelsPath(providerSpecificData: unknown): string | null {
   } catch {
     return null;
   }
-  if (/[\u0000-\u001F\u007F]/.test(decodedPathOnly)) return null;
+  if (ASCII_CONTROL_CHARS_PATTERN.test(decodedPathOnly)) return null;
   if (pathOnly.split("/").includes("..") || decodedPathOnly.split("/").includes("..")) {
     return null;
   }

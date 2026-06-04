@@ -597,10 +597,16 @@ test("v1 models catalog adds managed fallback models for Claude-compatible provi
   );
   const body = await response.json();
   const ids = new Set(body.data.map((item) => item.id));
+  const opus48 = body.data.find((item) => item.id === "ccdemo/claude-opus-4-8");
   const opus47 = body.data.find((item) => item.id === "ccdemo/claude-opus-4-7");
 
   assert.equal(response.status, 200);
   assert.ok(ids.has("ccdemo/claude-opus-4-6"));
+  assert.ok(opus48);
+  assert.equal(opus48.context_length, 1000000);
+  assert.equal(opus48.max_output_tokens, 128000);
+  assert.equal(opus48.capabilities?.thinking, true);
+  assert.ok(opus48.supported_reasoning_efforts.includes("xhigh"));
   assert.ok(opus47);
   assert.equal(opus47.context_length, 1000000);
   assert.equal(opus47.max_output_tokens, 128000);

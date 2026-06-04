@@ -30,6 +30,15 @@ function buildClaudeBody(overrides = {}) {
 }
 
 test("modelSpecs — Opus 4.7", async (t) => {
+  await t.test("getModelSpec returns the Opus 4.8 compatibility spec", () => {
+    const spec = getModelSpec("claude-opus-4-8");
+
+    assert.equal(spec?.maxOutputTokens, 128000);
+    assert.equal(spec?.contextWindow, 1000000);
+    assert.equal(spec?.supportsThinking, true);
+    assert.equal(spec?.minCacheablePromptTokens, 1024);
+  });
+
   await t.test("getModelSpec returns the Opus 4.7 compatibility spec", () => {
     const spec = getModelSpec("claude-opus-4-7");
 
@@ -39,13 +48,21 @@ test("modelSpecs — Opus 4.7", async (t) => {
   });
 
   await t.test(
-    "registry exposes Opus 4.7 1M context for Claude OAuth and API-key providers",
+    "registry exposes Opus 4.8/4.7 1M context for Claude OAuth and API-key providers",
     () => {
+      const claude48Model = REGISTRY.claude.models.find((model) => model.id === "claude-opus-4-8");
+      const anthropic48Model = REGISTRY.anthropic.models.find(
+        (model) => model.id === "claude-opus-4-8"
+      );
       const claudeModel = REGISTRY.claude.models.find((model) => model.id === "claude-opus-4-7");
       const anthropicModel = REGISTRY.anthropic.models.find(
         (model) => model.id === "claude-opus-4-7"
       );
 
+      assert.equal(claude48Model?.contextLength, 1000000);
+      assert.equal(claude48Model?.maxOutputTokens, 128000);
+      assert.equal(claude48Model?.supportsReasoning, true);
+      assert.equal(anthropic48Model?.contextLength, 1000000);
       assert.equal(claudeModel?.contextLength, 1000000);
       assert.equal(claudeModel?.maxOutputTokens, 128000);
       assert.equal(claudeModel?.supportsReasoning, true);
@@ -62,6 +79,7 @@ test("modelSpecs — Opus 4.7", async (t) => {
   });
 
   await t.test("getModelSpec resolves Claude 4 aliases and provider-prefixed IDs", () => {
+    assert.equal(getModelSpec("claude-opus-4.8")?.contextWindow, 1000000);
     assert.equal(getModelSpec("claude-opus-4.7")?.contextWindow, 1000000);
     assert.equal(getModelSpec("claude-opus-4.6")?.contextWindow, 1000000);
     assert.equal(getModelSpec("claude-sonnet-4.6")?.maxOutputTokens, 64000);
@@ -71,20 +89,24 @@ test("modelSpecs — Opus 4.7", async (t) => {
     assert.equal(getModelSpec("cline/anthropic/claude-opus-4-20250514")?.maxOutputTokens, 32000);
   });
 
-  await t.test("adaptive-only detection distinguishes Opus 4.7 from older models", () => {
+  await t.test("adaptive-only detection distinguishes Opus 4.8/4.7 from older models", () => {
+    assert.equal(isAdaptiveOnlyModel("claude-opus-4-8"), true);
     assert.equal(isAdaptiveOnlyModel("claude-opus-4-7"), true);
     assert.equal(isAdaptiveOnlyModel("claude-opus-4-6"), false);
     assert.equal(isAdaptiveOnlyModel("gemini-3-flash"), false);
   });
 
-  await t.test("sampling param rejection only applies to Opus 4.7", () => {
+  await t.test("sampling param rejection only applies to Opus 4.8/4.7", () => {
+    assert.equal(rejectsSamplingParams("claude-opus-4-8"), true);
     assert.equal(rejectsSamplingParams("claude-opus-4-7"), true);
     assert.equal(rejectsSamplingParams("claude-opus-4-6"), false);
   });
 
   await t.test("effort support and downgrade preserve 4.7 while downgrading 4.6", () => {
+    assert.equal(downgradeEffort("claude-opus-4-8", "xhigh"), "xhigh");
     assert.equal(downgradeEffort("claude-opus-4-7", "xhigh"), "xhigh");
     assert.equal(downgradeEffort("claude-opus-4-6", "xhigh"), "max");
+    assert.equal(isEffortSupported("claude-opus-4-8", "xhigh"), true);
     assert.equal(isEffortSupported("claude-opus-4-7", "xhigh"), true);
     assert.equal(isEffortSupported("claude-opus-4-6", "xhigh"), false);
   });
@@ -109,6 +131,20 @@ test("thinkingBudget — Opus 4.7 coercion", async (t) => {
     const result = applyThinkingBudget(
       {
         model: "claude-opus-4-7",
+        messages: buildMessages(),
+        reasoning_effort: "max",
+      },
+      DEFAULT_THINKING_CONFIG
+    );
+
+    assert.deepEqual(result.thinking, { type: "adaptive" });
+    assert.deepEqual(result.output_config, { effort: "max" });
+  });
+
+  await t.test("Opus 4.8 reasoning_effort max uses adaptive thinking with output_config", () => {
+    const result = applyThinkingBudget(
+      {
+        model: "claude-opus-4-8",
         messages: buildMessages(),
         reasoning_effort: "max",
       },
@@ -163,6 +199,18 @@ test("thinkingBudget — Opus 4.7 coercion", async (t) => {
     }
   );
 
+  await t.test(
+    "ensureThinkingConfig injects adaptive thinking for Opus 4.8 -thinking models",
+    () => {
+      const result = ensureThinkingConfig({
+        model: "claude-opus-4-8-thinking",
+        messages: buildMessages(),
+      });
+
+      assert.deepEqual(result.thinking, { type: "adaptive" });
+    }
+  );
+
   await t.test("Opus 4.7 keeps xhigh effort in adaptive output config", () => {
     const result = applyThinkingBudget(
       {
@@ -187,6 +235,18 @@ test("openaiToClaudeRequest — Opus 4.7 constraints", async (t) => {
     const result = openaiToClaudeRequest(
       "claude-opus-4-7",
       buildClaudeBody({ temperature: 0.7, top_p: 0.9 }),
+      false
+    );
+
+    assert.equal("temperature" in result, false);
+    assert.equal("top_p" in result, false);
+    assert.equal("top_k" in result, false);
+  });
+
+  await t.test("Opus 4.8 strips sampling params before sending to Anthropic", () => {
+    const result = openaiToClaudeRequest(
+      "claude-opus-4-8",
+      buildClaudeBody({ model: "claude-opus-4-8", temperature: 0.7, top_p: 0.9 }),
       false
     );
 
@@ -244,6 +304,20 @@ test("openaiToClaudeRequest — Opus 4.7 constraints", async (t) => {
     }
   );
 
+  await t.test(
+    "Opus 4.8 reasoning_effort fallback uses adaptive thinking instead of enabled",
+    () => {
+      const result = openaiToClaudeRequest(
+        "claude-opus-4-8",
+        buildClaudeBody({ model: "claude-opus-4-8", reasoning_effort: "high" }),
+        false
+      );
+
+      assert.deepEqual(result.thinking, { type: "adaptive", display: "summarized" });
+      assert.deepEqual(result.output_config, { effort: "high" });
+    }
+  );
+
   await t.test("Opus 4.6 reasoning_effort fallback preserves enabled-thinking behavior", () => {
     const result = openaiToClaudeRequest(
       "claude-opus-4-6",
@@ -289,6 +363,7 @@ test("downgradeEffort normalizes mixed-case input", async (t) => {
   });
 
   await t.test("isEffortSupported is case-insensitive", () => {
+    assert.equal(isEffortSupported("claude-opus-4-8", "XHIGH"), true);
     assert.equal(isEffortSupported("claude-opus-4-7", "XHIGH"), true);
     assert.equal(isEffortSupported("claude-opus-4-6", "XHIGH"), false);
   });

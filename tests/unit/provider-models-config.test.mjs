@@ -51,6 +51,13 @@ test("provider models helpers expose OpenAI GPT 5.x without changing chat-comple
   assert.equal(getModelTargetFormat("openai", "gpt-5.5"), null);
 });
 
+test("provider models helpers expose Claude Opus 4.8 without changing Opus defaults", () => {
+  assert.equal(getDefaultModel("cc"), "claude-opus-4-7");
+  assert.equal(getDefaultModel("anthropic"), "claude-opus-4-7");
+  assert.equal(isValidModel("cc", "claude-opus-4-8"), true);
+  assert.equal(isValidModel("anthropic", "claude-opus-4-8"), true);
+});
+
 test("provider models helpers resolve provider IDs through aliases", () => {
   const firstProviderId = Object.keys(PROVIDER_ID_TO_ALIAS)[0];
   const alias = PROVIDER_ID_TO_ALIAS[firstProviderId] || firstProviderId;
