@@ -132,11 +132,15 @@ test("T30: GPT 5.x Codex family fallback covers current GPT 5.5, 5.4, and Spark 
   );
   assert.equal(
     getNextFamilyFallback("claude-opus-4-7", new Set(), "claude", "claude"),
-    "claude-opus-4-6"
+    "claude-opus-4-8"
   );
   assert.equal(
     getNextFamilyFallback("claude-opus-4-7", new Set(), "anthropic-compatible-cc-edge", "claude"),
-    "claude-opus-4-6"
+    "claude-opus-4-8"
+  );
+  assert.equal(
+    getNextFamilyFallback("claude-opus-4-8", new Set(), "claude", "claude"),
+    "claude-opus-4-7"
   );
   assert.equal(
     getNextFamilyFallback("claude-opus-4-7", new Set(), "claude", "openai-responses"),

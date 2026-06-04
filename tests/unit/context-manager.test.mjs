@@ -83,6 +83,7 @@ test("getTokenLimit: registry caps override stale synced alias context", () => {
     },
     claude: {
       "claude-opus-4-7": capabilityEntry(200000),
+      "claude-opus-4-8": capabilityEntry(200000),
     },
   });
 
@@ -90,6 +91,8 @@ test("getTokenLimit: registry caps override stale synced alias context", () => {
   assert.equal(getTokenLimit("cx", "gpt-5.5"), 400000);
   assert.equal(getTokenLimit("claude", "claude-opus-4-7"), 1000000);
   assert.equal(getTokenLimit("cc", "claude-opus-4-7"), 1000000);
+  assert.equal(getTokenLimit("claude", "claude-opus-4-8"), 1000000);
+  assert.equal(getTokenLimit("cc", "claude-opus-4-8"), 1000000);
 });
 
 test("getTokenLimit: Codex aliases keep provider-scoped caps while generic specs stay public", () => {

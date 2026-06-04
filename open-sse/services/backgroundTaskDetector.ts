@@ -47,6 +47,7 @@ const DEFAULT_DETECTION_PATTERNS = [
 
 const DEFAULT_DEGRADATION_MAP: Record<string, string> = {
   // Premium → Cheap alternatives
+  "claude-opus-4-8": "gemini-3-flash",
   "claude-opus-4-7": "gemini-3-flash",
   "claude-opus-4-6": "gemini-3-flash",
   "claude-opus-4-6-thinking": "gemini-3-flash",

@@ -6,6 +6,7 @@ type OpenCodeConfigInput = {
 
 const OPENCODE_DEFAULT_MODELS = [
   "claude-opus-4-7",
+  "claude-opus-4-8",
   "claude-sonnet-4-5-thinking",
   "gemini-3.1-pro-high",
   "gemini-3-flash",

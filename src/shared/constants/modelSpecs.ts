@@ -23,6 +23,7 @@ export interface ModelSpec {
   supportedEfforts?: string[]; // valid effort levels for this model
   defaultThinkingDisplay?: ThinkingDisplay; // default display mode for thinking blocks
   rejectsSamplingParams?: boolean; // true if non-default temperature/top_p/top_k → 400
+  minCacheablePromptTokens?: number; // prompt caching minimum for supported providers
 }
 
 export const MODEL_SPECS: Record<string, ModelSpec> = {
@@ -305,6 +306,23 @@ export const MODEL_SPECS: Record<string, ModelSpec> = {
       "claude-opus-4-6-thinking",
       "claude-opus-4.6-thinking",
     ],
+  },
+
+  // ── Claude Opus 4.8 ─────────────────────────────────────────────
+  "claude-opus-4-8": {
+    maxOutputTokens: 128000,
+    contextWindow: 1000000,
+    defaultThinkingBudget: 0,
+    thinkingBudgetCap: 0,
+    supportsThinking: true,
+    supportsTools: true,
+    supportsVision: true,
+    supportedThinkingModes: ["adaptive", "disabled"],
+    supportedEfforts: ["low", "medium", "high", "xhigh", "max"],
+    defaultThinkingDisplay: "omitted",
+    rejectsSamplingParams: true,
+    minCacheablePromptTokens: 1024,
+    aliases: ["claude-opus-4.8", "claude-opus-4-8-thinking", "claude-opus-4.8-thinking"],
   },
 
   // ── Claude Opus 4.7 ─────────────────────────────────────────────

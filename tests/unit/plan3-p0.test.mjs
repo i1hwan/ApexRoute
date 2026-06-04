@@ -85,7 +85,15 @@ test("getModelInfoCore returns explicit ambiguity metadata for ambiguous unprefi
   assert.ok(info.candidateProviders.length >= 2);
 });
 
-test("getModelInfoCore routes bare Opus 4.7 to Anthropic while preserving explicit Claude OAuth", async () => {
+test("getModelInfoCore routes bare Opus 4.8/4.7 to Anthropic while preserving explicit Claude OAuth", async () => {
+  const bare48 = await getModelInfoCore("claude-opus-4-8", {});
+  assert.equal(bare48.provider, "anthropic");
+  assert.equal(bare48.model, "claude-opus-4-8");
+
+  const oauth48 = await getModelInfoCore("cc/claude-opus-4-8", {});
+  assert.equal(oauth48.provider, "claude");
+  assert.equal(oauth48.model, "claude-opus-4-8");
+
   const bare = await getModelInfoCore("claude-opus-4-7", {});
   assert.equal(bare.provider, "anthropic");
   assert.equal(bare.model, "claude-opus-4-7");
