@@ -24,12 +24,20 @@ export function resolveToolArgumentMode(
   provider: string | null,
   forwardingLane: ForwardingLane | null
 ): ToolArgumentMode {
-  if (!settings || typeof settings !== "object") return "stream-normalized";
-
-  if (forwardingLane && settings.byLane && typeof settings.byLane === "object") {
+  if (
+    forwardingLane &&
+    settings &&
+    typeof settings === "object" &&
+    settings.byLane &&
+    typeof settings.byLane === "object"
+  ) {
     const laneValue = settings.byLane[forwardingLane];
     if (isValidMode(laneValue)) return laneValue;
   }
+
+  if (forwardingLane === "claude-oauth-prefixed") return "buffered-final";
+
+  if (!settings || typeof settings !== "object") return "stream-normalized";
 
   if (provider && settings.byProvider && typeof settings.byProvider === "object") {
     const providerValue = settings.byProvider[provider];

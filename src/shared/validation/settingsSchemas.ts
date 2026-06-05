@@ -57,7 +57,7 @@ export type SseDiagnosticsSettings = z.infer<typeof sseDiagnosticsSettingsSchema
 export const TOOL_ARGUMENT_MODE_DEFAULT: ToolArgumentModeSettings = {
   default: "stream-normalized",
   byProvider: {},
-  byLane: {},
+  byLane: { "claude-oauth-prefixed": "buffered-final" },
 };
 
 export const LOW_QUOTA_BYPASS_DEFAULT: LowQuotaBypassSettings = {

@@ -8,6 +8,14 @@ const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const ROOT = join(__dirname, "..", "..");
 
 const MIGRATION = join(ROOT, "src", "lib", "db", "migrations", "021_compatibility_settings.sql");
+const MIGRATION_022 = join(
+  ROOT,
+  "src",
+  "lib",
+  "db",
+  "migrations",
+  "022_claude_oauth_buffered_tool_args.sql"
+);
 const SCHEMAS = join(ROOT, "src", "shared", "validation", "settingsSchemas.ts");
 const SETTINGS_DB = join(ROOT, "src", "lib", "db", "settings.ts");
 
@@ -30,9 +38,19 @@ test("migration 021 file exists and contains 3 settings rows", () => {
   assert.equal(insertCount, 3, "expected exactly 3 INSERT OR IGNORE statements");
 });
 
-test("migration 021 default for toolArgumentMode is stream-normalized", () => {
+test("migration 021 default keeps stream-normalized globally and buffers Claude OAuth lane", () => {
   const sql = readFileSync(MIGRATION, "utf8");
   assert.match(sql, /"default":"stream-normalized"/);
+  assert.match(sql, /"byLane":\{"claude-oauth-prefixed":"buffered-final"\}/);
+});
+
+test("migration 022 upgrades only the old empty-lane toolArgumentMode default", () => {
+  assert.ok(existsSync(MIGRATION_022), "022_claude_oauth_buffered_tool_args.sql is missing");
+  const sql = readFileSync(MIGRATION_022, "utf8");
+  assert.match(sql, /INSERT OR IGNORE INTO key_value/);
+  assert.match(sql, /UPDATE key_value/);
+  assert.match(sql, /"byLane":\{"claude-oauth-prefixed":"buffered-final"\}/);
+  assert.match(sql, /value = '\{"default":"stream-normalized","byProvider":\{\},"byLane":\{\}\}'/);
 });
 
 test("migration 021 default for lowQuotaBypass is false", () => {

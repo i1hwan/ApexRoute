@@ -2,7 +2,7 @@ INSERT OR IGNORE INTO key_value (namespace, key, value)
 VALUES (
   'settings',
   'toolArgumentMode',
-  '{"default":"stream-normalized","byProvider":{},"byLane":{}}'
+  '{"default":"stream-normalized","byProvider":{},"byLane":{"claude-oauth-prefixed":"buffered-final"}}'
 );
 
 INSERT OR IGNORE INTO key_value (namespace, key, value)
