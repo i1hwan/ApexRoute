@@ -36,6 +36,13 @@ function feedStop(state, blockIndex) {
   return feed(state, { type: "content_block_stop", index: blockIndex });
 }
 
+function feedStopAfterDeltas(state, blockIndex, partialJsonChunks) {
+  for (const partialJson of partialJsonChunks) {
+    feedDelta(state, blockIndex, partialJson);
+  }
+  return feedStop(state, blockIndex);
+}
+
 function feedMessageDelta(state, stop_reason) {
   return feed(state, { type: "message_delta", delta: { stop_reason } });
 }
@@ -110,7 +117,7 @@ function findFinishReasonIndex(chunks, reason) {
   return -1;
 }
 
-test("§7.2.1 buffered-final emits single chunk at content_block_stop with full args", () => {
+test("§7.2.1 buffered-final emits single chunk at content_block_stop with normalized full args", () => {
   const state = createState("buffered-final");
   feed(state, { type: "message_start", message: { id: "msg1", model: "claude-opus-4-7" } });
   const start = feedToolUseStart(state, 0, "toolu_x", "save_doc");
@@ -143,10 +150,93 @@ test("§7.2.1 buffered-final emits single chunk at content_block_stop with full 
   assert.equal(tc.id, "toolu_x");
   assert.equal(tc.type, "function");
   assert.equal(tc.function.name, "save_doc");
-  assert.equal(tc.function.arguments, '{"title":"\\uad6c\\ud604"}');
+  assert.equal(tc.function.arguments, '{"title":"구현"}');
 
-  assert.equal(state.toolCalls.get(0).function.arguments, '{"title":"\\uad6c\\ud604"}');
+  assert.equal(state.toolCalls.get(0).function.arguments, '{"title":"구현"}');
   assert.deepEqual(JSON.parse(state.toolCalls.get(0).function.arguments), { title: "구현" });
+});
+
+test("§7.2.1b buffered-final normalizes Hermes clarify question unicode escapes", () => {
+  const state = createState("buffered-final");
+  feed(state, { type: "message_start", message: { id: "msg1", model: "claude-opus-4-8" } });
+  feedToolUseStart(state, 0, "toolu_clarify", "clarify");
+  const stop = feedStopAfterDeltas(state, 0, [
+    '{"question":"mlbasics \\u',
+    'd3f4\\ub354 \\uc548\\uc758 humanize \\uc18c\\uc18d \\ud30c\\uc77c\\uc744 \\uc81c\\uac70\\ud574\\ub3c4 \\ub420\\uae4c\\uc694?",',
+    '"choices":["제거 진행","_workspace만 남기기"]}',
+  ]);
+
+  const fullEmit = stop.find((c) => c?.choices?.[0]?.delta?.tool_calls);
+  const args = fullEmit.choices[0].delta.tool_calls[0].function.arguments;
+
+  assert.equal(
+    args,
+    '{"question":"mlbasics 폴더 안의 humanize 소속 파일을 제거해도 될까요?","choices":["제거 진행","_workspace만 남기기"]}'
+  );
+  assert.ok(!args.includes("\\ud3f4"));
+  assert.ok(!args.includes("\\ub354"));
+  assert.deepEqual(JSON.parse(args), {
+    question: "mlbasics 폴더 안의 humanize 소속 파일을 제거해도 될까요?",
+    choices: ["제거 진행", "_workspace만 남기기"],
+  });
+});
+
+test("§7.2.1c buffered-final repairs literal unicode escapes only in clarify display fields", () => {
+  const state = createState("buffered-final");
+  feed(state, { type: "message_start", message: { id: "msg1", model: "claude-opus-4-8" } });
+  feedToolUseStart(state, 0, "toolu_clarify", "clarify");
+  const stop = feedStopAfterDeltas(state, 0, [
+    '{"question":"mlbasics \\\\ud3f4\\\\ub354 \\\\uc548\\\\uc758 humanize \\\\uc18c\\\\uc18d \\\\ud30c\\\\uc77c\\\\uc744 \\\\uc81c\\\\uac70\\\\ud574\\\\ub3c4 \\\\ub420\\\\uae4c\\\\uc694?",',
+    '"options":[{"label":"\\\\uc81c\\\\uac70 \\\\uc9c4\\\\ud589","description":"\\\\uc6d0\\\\ubcf8\\\\uc740 \\\\uc548\\\\uc804\\\\ud569\\\\ub2c8\\\\ub2e4"}],',
+    '"literal":"\\\\uad6c"}',
+  ]);
+
+  const fullEmit = stop.find((c) => c?.choices?.[0]?.delta?.tool_calls);
+  const args = fullEmit.choices[0].delta.tool_calls[0].function.arguments;
+  const parsed = JSON.parse(args);
+
+  assert.equal(parsed.question, "mlbasics 폴더 안의 humanize 소속 파일을 제거해도 될까요?");
+  assert.deepEqual(parsed.options, [{ label: "제거 진행", description: "원본은 안전합니다" }]);
+  assert.equal(parsed.literal, "\\uad6c");
+});
+
+test("§7.2.1d buffered-final preserves literal unicode escapes for non-display tools", () => {
+  const state = createState("buffered-final");
+  feed(state, { type: "message_start", message: { id: "msg1", model: "claude-opus-4-8" } });
+  feedToolUseStart(state, 0, "toolu_save", "save_doc");
+  const stop = feedStopAfterDeltas(state, 0, [
+    '{"question":"mlbasics \\\\ud3f4\\\\ub354","title":"\\\\uad6c\\\\ud604"}',
+  ]);
+
+  const fullEmit = stop.find((c) => c?.choices?.[0]?.delta?.tool_calls);
+  const args = fullEmit.choices[0].delta.tool_calls[0].function.arguments;
+  const parsed = JSON.parse(args);
+
+  assert.equal(parsed.question, "mlbasics \\ud3f4\\ub354");
+  assert.equal(parsed.title, "\\uad6c\\ud604");
+});
+
+test("§7.2.1e buffered-final preserves literal and semantic JSON escapes", () => {
+  const state = createState("buffered-final");
+  feed(state, { type: "message_start", message: { id: "msg1", model: "claude-opus-4-8" } });
+  feedToolUseStart(state, 0, "toolu_escape", "clarify");
+  const stop = feedStopAfterDeltas(state, 0, [
+    '{"literal":"\\\\uad6c","encodedQuote":"\\u0022","encodedBackslash":"\\u005c",',
+    '"newline":"line\\nnext","korean":"\\uad6c"}',
+  ]);
+
+  const fullEmit = stop.find((c) => c?.choices?.[0]?.delta?.tool_calls);
+  const args = fullEmit.choices[0].delta.tool_calls[0].function.arguments;
+  const parsed = JSON.parse(args);
+
+  assert.equal(parsed.literal, "\\uad6c");
+  assert.equal(parsed.encodedQuote, '"');
+  assert.equal(parsed.encodedBackslash, "\\");
+  assert.equal(parsed.newline, "line\nnext");
+  assert.equal(parsed.korean, "구");
+  assert.ok(args.includes('"literal":"\\\\uad6c"'));
+  assert.ok(/"encodedQuote":"\\(u0022|")"/.test(args));
+  assert.ok(/"encodedBackslash":"\\(u005[cC]|\\)"/.test(args));
 });
 
 test("§7.2.2 stream-normalized mode unchanged when mode flag absent (regression guard)", () => {
@@ -336,14 +426,8 @@ test("resolveToolArgumentMode resolver precedence", async () => {
 
   assert.equal(resolveToolArgumentMode(null, "claude", null), "stream-normalized");
   assert.equal(resolveToolArgumentMode({}, "claude", null), "stream-normalized");
-  assert.equal(
-    resolveToolArgumentMode(null, "claude", "claude-oauth-prefixed"),
-    "buffered-final"
-  );
-  assert.equal(
-    resolveToolArgumentMode({}, "claude", "claude-oauth-prefixed"),
-    "buffered-final"
-  );
+  assert.equal(resolveToolArgumentMode(null, "claude", "claude-oauth-prefixed"), "buffered-final");
+  assert.equal(resolveToolArgumentMode({}, "claude", "claude-oauth-prefixed"), "buffered-final");
   assert.equal(
     resolveToolArgumentMode({ default: "buffered-final" }, "claude", null),
     "buffered-final"
