@@ -1,5 +1,6 @@
 import { register } from "../registry.ts";
 import { FORMATS } from "../formats.ts";
+import { normalizeHumanVisibleToolArguments } from "../helpers/humanVisibleToolArguments.ts";
 import { createJsonUnicodeNormalizer } from "../helpers/jsonUnicodeNormalizer.ts";
 
 type OpenAIUsage = {
@@ -95,12 +96,9 @@ export function claudeToOpenAIResponse(chunk, state) {
           },
         };
         state.toolCalls.set(chunk.index, toolCall);
-        if (state.toolArgumentMode === "buffered-final") {
-          // Defer emit until content_block_stop. No normalizer needed —
-          // raw partial_json is concatenated as-is.
-        } else {
-          if (!state.toolArgNormalizers) state.toolArgNormalizers = new Map();
-          state.toolArgNormalizers.set(chunk.index, createJsonUnicodeNormalizer());
+        if (!state.toolArgNormalizers) state.toolArgNormalizers = new Map();
+        state.toolArgNormalizers.set(chunk.index, createJsonUnicodeNormalizer());
+        if (state.toolArgumentMode !== "buffered-final") {
           results.push(createChunk(state, { tool_calls: [toolCall] }));
         }
       }
@@ -118,16 +116,12 @@ export function claudeToOpenAIResponse(chunk, state) {
       } else if (delta?.type === "input_json_delta" && delta.partial_json) {
         const toolCall = state.toolCalls.get(chunk.index);
         if (toolCall) {
-          if (state.toolArgumentMode === "buffered-final") {
-            toolCall.function.arguments += delta.partial_json;
-          } else {
-            // Fallback to verbatim forwarding if normalizer is missing —
-            // preserves pre-fix behaviour for legacy state shapes.
-            const normalizer = state.toolArgNormalizers?.get(chunk.index);
-            const normalized = normalizer
-              ? normalizer.write(delta.partial_json)
-              : delta.partial_json;
-            toolCall.function.arguments += normalized;
+          // Fallback to verbatim forwarding if normalizer is missing —
+          // preserves pre-fix behaviour for legacy state shapes.
+          const normalizer = state.toolArgNormalizers?.get(chunk.index);
+          const normalized = normalizer ? normalizer.write(delta.partial_json) : delta.partial_json;
+          toolCall.function.arguments += normalized;
+          if (state.toolArgumentMode !== "buffered-final") {
             if (normalized.length > 0) {
               results.push(
                 createChunk(state, {
@@ -158,6 +152,15 @@ export function claudeToOpenAIResponse(chunk, state) {
       const toolCallAtIndex = state.toolCalls.get(chunk.index);
 
       if (state.toolArgumentMode === "buffered-final" && toolCallAtIndex) {
+        const normalizer = state.toolArgNormalizers?.get(chunk.index);
+        if (normalizer) {
+          toolCallAtIndex.function.arguments += normalizer.flush();
+          state.toolArgNormalizers.delete(chunk.index);
+        }
+        toolCallAtIndex.function.arguments = normalizeHumanVisibleToolArguments(
+          toolCallAtIndex.function.name,
+          toolCallAtIndex.function.arguments
+        );
         // Emit a single full chunk that carries id + type + name + the entire
         // accumulated arguments. OpenAI-compat clients accumulate
         // tool_calls.function.arguments via `+=`, so a single emit equals one
